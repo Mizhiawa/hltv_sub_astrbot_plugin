@@ -1,0 +1,74 @@
+{
+  "hltv_min_delay": {
+    "type": "float",
+    "default": 5.0,
+    "name": "最小延迟（秒）",
+    "description": "请求重试时的延迟基数（秒）。"
+  },
+  "hltv_timeout": {
+    "type": "int",
+    "default": 15,
+    "name": "超时时间（秒）",
+    "description": "HLTV 请求超时时间（秒）。"
+  },
+  "hltv_timezone": {
+    "type": "string",
+    "default": "Asia/Shanghai",
+    "name": "时区",
+    "description": "比赛时间显示的时区，如 Asia/Shanghai。"
+  },
+  "hltv_auto_unsub_delay_days": {
+    "type": "int",
+    "default": 2,
+    "name": "自动退订延迟天数",
+    "description": "赛事结束后延迟多少天自动取消订阅。"
+  },
+  "hltv_notified_ttl_days": {
+    "type": "int",
+    "default": 30,
+    "name": "推送去重状态保留天数",
+    "description": "推送去重状态（已提醒/已推送的比赛 ID）保留天数。"
+  },
+  "hltv_scheduler_max_parallel": {
+    "type": "int",
+    "default": 3,
+    "name": "多赛事轮询并发上限",
+    "description": "多赛事轮询并发上限（防止请求风暴）。"
+  },
+  "hltv_scheduler_jitter_seconds": {
+    "type": "int",
+    "default": 8,
+    "name": "每赛事 job 触发抖动（秒）",
+    "description": "每个赛事轮询 job 触发时的随机抖动，避免同刻并发。"
+  },
+  "hltv_watermark_text": {
+    "type": "string",
+    "default": "Designed by Hakuchumu\nModified by M1z",
+    "name": "水印文本",
+    "description": "图片水印文本，支持换行（\\n）。"
+  },
+  "hltv_proxy_list": {
+    "type": "list",
+    "default": [],
+    "name": "代理列表",
+    "description": "可选代理列表，如 [\"http://127.0.0.1:7890\"]。"
+  },
+  "hltv_impersonate": {
+    "type": "string",
+    "default": "chrome124",
+    "name": "浏览器指纹模拟",
+    "description": "curl_cffi impersonate 参数，当前对 HLTV 更稳定的 Chrome 指纹。"
+  },
+  "hltv_flaresolverr_url": {
+    "type": "string",
+    "default": "",
+    "name": "FlareSolverr 地址",
+    "description": "可选，Cloudflare 挑战回退。例如 http://localhost:8191/v1"
+  },
+  "hltv_superusers": {
+    "type": "list",
+    "default": [],
+    "name": "插件超级用户",
+    "description": "插件级超级用户 ID 列表（调试命令 hltv_check/hltv_trigger 使用）。留空时回退到 AstrBot 的 admins_id。"
+  }
+}

@@ -1,0 +1,10 @@
+name: hltv_sub
+display_name: HLTV订阅
+desc: HLTV CS2 赛事订阅和比赛信息查询。支持赛事订阅、比赛/结果/数据查询、开赛提醒与结果推送。
+short_desc: HLTV CS2 赛事订阅与推送
+author: Hakuchumu
+version: 1.0.0
+repo: https://github.com/Hakuchumu/HakuBot
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.5.0"

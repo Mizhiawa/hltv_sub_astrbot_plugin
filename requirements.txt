@@ -1,0 +1,12 @@
+# 网络请求
+curl_cffi>=0.7.4
+httpx>=0.27.0
+# HTML 解析
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+# 时区
+pytz>=2024.1
+# 图片渲染（纯 Python 绘图，无需浏览器）
+Pillow>=10.3.0
+# 定时任务调度
+apscheduler>=3.10.0,<4.0
