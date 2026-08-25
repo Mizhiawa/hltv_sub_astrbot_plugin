@@ -682,6 +682,10 @@ class HLTVScheduler:
     async def send_completed_map_result(
         self, completed_map: CompletedMapResult
     ) -> None:
+        # 关闭"播报单图结果"开关时，不发送单图播报；开赛提醒与整场结果推送不受影响
+        if not plugin_config.hltv_enable_map_result_push:
+            return
+
         groups = data_manager.get_groups_by_event(completed_map.event_id)
         if not groups:
             return

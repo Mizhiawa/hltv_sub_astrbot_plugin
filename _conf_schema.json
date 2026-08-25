@@ -70,5 +70,11 @@
     "default": [],
     "name": "插件超级用户",
     "description": "插件级超级用户 ID 列表（调试命令 hltv_check/hltv_trigger 使用）。留空时回退到 AstrBot 的 admins_id。"
+  },
+  "hltv_enable_map_result_push": {
+    "type": "bool",
+    "default": true,
+    "name": "播报单图结果",
+    "description": "关闭后，非 BO1 比赛每打完一张地图不再逐图播报，仅在比赛开始与整场结束时播报。"
   }
 }
