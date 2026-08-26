@@ -842,16 +842,17 @@ async def render_reminder(
     _rounded_card(draw, (x, y, x + inner, y + 92), fill=PANEL, radius=10)
     cy = y + 46
     team_w = (inner - 60) // 2
+    team_font = _font(18, bold=True)
     _rounded_card(draw, (x + 10, y + 12, x + 10 + team_w, y + 80), fill=CARD_ALT, radius=8)
-    _draw_text(draw, (x + 10 + team_w // 2, cy), _truncate(draw, team1, _font(16, bold=True), team_w - 20), _font(16, bold=True), fill=WHITE, anchor="ma")
+    _draw_text(draw, (x + 10 + team_w // 2, cy), _truncate(draw, team1, team_font, team_w - 20), team_font, fill=WHITE, anchor="mm")
     _rounded_card(draw, (x + inner - 10 - team_w, y + 12, x + inner - 10, y + 80), fill=CARD_ALT, radius=8)
-    _draw_text(draw, (x + inner - 10 - team_w // 2, cy), _truncate(draw, team2, _font(16, bold=True), team_w - 20), _font(16, bold=True), fill=WHITE, anchor="ma")
+    _draw_text(draw, (x + inner - 10 - team_w // 2, cy), _truncate(draw, team2, team_font, team_w - 20), team_font, fill=WHITE, anchor="mm")
     _draw_text(draw, (width // 2, cy), "VS", _font(20, bold=True), fill=ORANGE, anchor="mm")
     y += 108
 
     if maps:
         _rounded_card(draw, (x, y, x + inner, y + 44), fill=PANEL, radius=8)
-        _draw_text(draw, (width // 2, y + 22), f"◆ 比赛格式  BO{maps}", _font(14, bold=True), fill=WHITE, anchor="ma")
+        _draw_text(draw, (width // 2, y + 22), f"◆ 比赛格式  BO{maps}", _font(14, bold=True), fill=WHITE, anchor="mm")
         y += 60
 
     _footer(draw, x, y, width, f"HLTV SUB PLUGIN • {get_timestamp()}")
