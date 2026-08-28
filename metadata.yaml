@@ -4,7 +4,7 @@ desc: HLTV CS2 赛事订阅和比赛信息查询。支持赛事订阅、比赛/�
 short_desc: HLTV CS2 赛事订阅与推送
 author: Hakuchumu
 version: 1.0.0
-repo: https://github.com/Hakuchumu/HakuBot
+repo: https://github.com/Mizhiawa/hltv_sub_astrbot_plugin
 support_platforms:
   - aiocqhttp
 astrbot_version: ">=4.5.0"

@@ -179,8 +179,12 @@ class HLTVHttpClient:
 
     async def fetch_with_meta(self, url: str, max_retries: int = 5) -> FetchResult:
         """发送请求获取 HTML + 响应元信息"""
+        # 动态抓取接口（matches 列表 / matches 详情）：让 curl_cffi 的 impersonate
+        # 自动生成与指纹完全匹配的请求头，避免手动覆盖头与 TLS 指纹不一致被 CF 拦截。
+        # results / events 等列表页对头不敏感，沿用手动头（保持原有稳定性）。
+        is_dynamic_path = "/matches" in url
+        headers = _build_headers(self._impersonate) if not is_dynamic_path else None
         session = await self._get_session()
-        headers = _build_headers(self._impersonate)
 
         last_status: Optional[int] = None
         last_final_url = ""
@@ -196,7 +200,7 @@ class HLTVHttpClient:
                     await asyncio.sleep(delay)
 
                 proxy = self._pick_proxy()
-                logger.info(f"[HLTV] 正在请求: {url} (proxy={proxy or 'direct'}, impersonate={self._impersonate})")
+                logger.info(f"[HLTV] 正在请求: {url} (proxy={proxy or 'direct'}, impersonate={self._impersonate}, headers={'auto' if headers is None else 'custom'})")
 
                 response = await session.get(
                     url,

@@ -628,29 +628,38 @@ async def render_stats(stats: Optional[MatchStats]) -> bytes:
 
 
 def _draw_map_items(draw, x: int, y: int, inner: int, maps) -> None:
-    """地图比分卡片（一行横向排列）"""
-    card_w = 150
+    """地图比分卡片（一行均分铺满整行，标题/比分/pick 均居中）"""
+    n = max(1, len(maps))
     gap = 10
-    n = min(len(maps), max(1, (inner + gap) // (card_w + gap)))
-    for i, m in enumerate(maps[:n]):
+    card_w = (inner - gap * (n - 1)) // n
+    for i, m in enumerate(maps):
         cx = x + i * (card_w + gap)
+        cxm = cx + card_w // 2
         _rounded_card(draw, (cx, y, cx + card_w, y + 72), fill=CARD_ALT, radius=8)
-        _draw_text(draw, (cx + card_w // 2, y + 10), _truncate(draw, m.map_name, _font(13, bold=True), card_w - 20), _font(13, bold=True), fill=ORANGE, anchor="ma")
+
+        # 地图名（顶部居中）
+        _draw_text(draw, (cxm, y + 14), _truncate(draw, m.map_name, _font(13, bold=True), card_w - 20), _font(13, bold=True), fill=ORANGE, anchor="mm")
+
+        # 比分（居中）
         try:
             ms1, ms2 = int(m.score_team1), int(m.score_team2)
             m1_won = ms1 > ms2
         except (TypeError, ValueError):
             m1_won = False
         score_font = _font(18, bold=True)
+        sep_font = _font(16, bold=True)
         s1_w = _text_width(draw, m.score_team1, score_font)
-        sep_w = _text_width(draw, ":", _font(16, bold=True))
-        total = s1_w + sep_w + _text_width(draw, m.score_team2, score_font)
-        sx = cx + card_w // 2 - total // 2
-        _draw_text(draw, (sx, y + 40), m.score_team1, score_font, fill=GREEN if m1_won else TEXT_DIM, anchor="lm")
-        _draw_text(draw, (sx + s1_w, y + 40), ":", _font(16, bold=True), fill=(85, 85, 85), anchor="lm")
-        _draw_text(draw, (sx + s1_w + sep_w, y + 40), m.score_team2, score_font, fill=GREEN if not m1_won else TEXT_DIM, anchor="lm")
+        sep_w = _text_width(draw, ":", sep_font)
+        s2_w = _text_width(draw, m.score_team2, score_font)
+        total = s1_w + sep_w + s2_w
+        sx = cxm - total // 2
+        _draw_text(draw, (sx, y + 38), m.score_team1, score_font, fill=GREEN if m1_won else TEXT_DIM, anchor="lm")
+        _draw_text(draw, (sx + s1_w, y + 38), ":", sep_font, fill=(85, 85, 85), anchor="lm")
+        _draw_text(draw, (sx + s1_w + sep_w, y + 38), m.score_team2, score_font, fill=GREEN if not m1_won else TEXT_DIM, anchor="lm")
+
+        # pick（底部居中）
         pick_text = f"{m.pick_by} pick" if m.pick_by else "Decider"
-        _draw_text(draw, (cx + card_w // 2, y + 58), pick_text, _font(11), fill=PURPLE if not m.pick_by else TEXT_DARK, anchor="ma")
+        _draw_text(draw, (cxm, y + 58), pick_text, _font(11), fill=PURPLE if not m.pick_by else TEXT_DARK, anchor="mm")
 
 
 def _players_grid(draw, x: int, y: int, inner: int, stats, players, title_suffix: str) -> None:
@@ -676,7 +685,7 @@ def _player_column(draw, x: int, y: int, col_w: int, team_name: str, players, ac
     small = _font(11)
     for p in players:
         nickname = _truncate(draw, p.nickname, _font(12, bold=True), col_w - 300)
-        _draw_text(draw, (x + 12, ry), nickname, _font(12, bold=True), fill=WHITE)
+        _draw_text(draw, (x + 12, ry), nickname, _font(12, bold=True), fill=WHITE)  # 顶部对齐（恢复最初位置）
         kd = f"{p.kills}/{p.deaths}"
         swing = p.swing or ""
         adr = p.adr or ""
@@ -699,7 +708,8 @@ def _player_column(draw, x: int, y: int, col_w: int, team_name: str, players, ac
         rx = x + col_w - 12
         for text, color in items:
             w = _text_width(draw, text, small)
-            _draw_text(draw, (rx, ry), text, small, fill=color, anchor="rm")
+            # 与昵称同一顶部基线（右+顶），避免此前"数据偏高"
+            _draw_text(draw, (rx, ry), text, small, fill=color, anchor="ra")
             rx -= w + 16
         ry += row_h
 
