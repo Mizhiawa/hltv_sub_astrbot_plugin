@@ -102,7 +102,7 @@ Windows / macOS 自带中文字体，无需处理。
 | --- | --- | --- |
 | `hltv_timezone` | `Asia/Shanghai` | 比赛时间显示时区 |
 | `hltv_timeout` | `15` | 请求超时（秒） |
-| `hltv_request_interval_seconds` | `8.0` | 任意两次访问 HLTV 的最小间隔。**调大它是最有效的防封手段**（建议 8~15） |
+| `hltv_request_interval_seconds` | `15.0` | 任意两次访问 HLTV 的最小间隔。**调大它是最有效的防封手段**（建议 15~30，与原版 HakuBot 一致） |
 | `hltv_block_cooldown_seconds` | `600` | 被 Cloudflare 拦截后首次冷却时长（秒） |
 | `hltv_block_cooldown_max_seconds` | `7200` | 连续被拦截时冷却时间的上限（秒） |
 | `hltv_flaresolverr_timeout_seconds` | `60` | 单次浏览器求解超时（秒） |
@@ -164,7 +164,9 @@ docker run -d --name flaresolverr -p 8191:8191 --restart unless-stopped \
 
 ### 3. 其他可调项
 
-- 把 `hltv_request_interval_seconds` 调大（8 → 15）能明显降低被拦概率；
+- 把 `hltv_request_interval_seconds` 调大（15 → 30）能明显降低被拦概率。默认值
+  15 秒与原版 HakuBot 保持一致；代价是请求变慢，订阅赛事较多时 `matches`
+  命令可能需要多等一会儿（同一页面的重复查询会命中缓存，不额外耗时）；
 - 把 `hltv_impersonate` 换成更新的指纹（如 `chrome131`）有时也有效；
 - 出口 IP 是机房 IP 时更容易被拦，`hltv_proxy_list` 配住宅代理效果最好；
 - 被 Cloudflare 硬封禁（页面提示 `You have been blocked`）时换会话无效，

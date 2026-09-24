@@ -13,9 +13,9 @@
   },
   "hltv_request_interval_seconds": {
     "type": "float",
-    "default": 8.0,
+    "default": 15.0,
     "name": "请求最小间隔（秒）",
-    "description": "任意两次访问 HLTV 之间的最小间隔。调大可显著降低被 Cloudflare 拦截的概率，代价是查询变慢（建议 8~15）。"
+    "description": "任意两次访问 HLTV 之间的最小间隔。调大可显著降低被 Cloudflare 拦截的概率，代价是查询变慢（建议 15~30）。"
   },
   "hltv_block_cooldown_seconds": {
     "type": "int",

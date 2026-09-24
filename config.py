@@ -15,7 +15,7 @@ from typing import Any
 _DEFAULTS: dict[str, Any] = {
     "hltv_min_delay": 5.0,  # 已废弃（保留仅为兼容旧配置），改用 hltv_request_interval_seconds
     "hltv_timeout": 15,  # 超时时间（秒）
-    "hltv_request_interval_seconds": 8.0,  # 任意两次 HLTV 请求之间的最小间隔（秒）
+    "hltv_request_interval_seconds": 15.0,  # 任意两次 HLTV 请求之间的最小间隔（秒）
     "hltv_block_cooldown_seconds": 600,  # 被 Cloudflare 拦截后的首次冷却时长（秒）
     "hltv_block_cooldown_max_seconds": 7200,  # 连续被拦截时冷却上限（秒）
     "hltv_flaresolverr_timeout_seconds": 60,  # 单次浏览器求解超时（秒）
