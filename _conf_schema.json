@@ -81,7 +81,7 @@
     "type": "string",
     "default": "chrome124",
     "name": "浏览器指纹模拟",
-    "description": "curl_cffi impersonate 参数，当前对 HLTV 更稳定的 Chrome 指纹。"
+    "description": "curl_cffi impersonate 参数。UA、Sec-Ch-Ua 等请求头由该指纹统一生成以保证与 TLS 指纹自洽；填了当前 curl_cffi 不支持的档位会自动回退到可用指纹（日志有提示），因此可以放心尝试更新的版本（如 chrome131）。"
   },
   "hltv_flaresolverr_url": {
     "type": "string",

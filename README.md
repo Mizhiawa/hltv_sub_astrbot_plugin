@@ -167,7 +167,9 @@ docker run -d --name flaresolverr -p 8191:8191 --restart unless-stopped \
 - 把 `hltv_request_interval_seconds` 调大（15 → 30）能明显降低被拦概率。默认值
   15 秒与原版 HakuBot 保持一致；代价是请求变慢，订阅赛事较多时 `matches`
   命令可能需要多等一会儿（同一页面的重复查询会命中缓存，不额外耗时）；
-- 把 `hltv_impersonate` 换成更新的指纹（如 `chrome131`）有时也有效；
+- 把 `hltv_impersonate` 换成更新的指纹（如 `chrome131`）有时也有效。填了当前
+  curl_cffi 不支持的档位会自动回退到可用指纹（日志会给出提示），不会导致插件
+  不可用，所以可以放心试；
 - 出口 IP 是机房 IP 时更容易被拦，`hltv_proxy_list` 配住宅代理效果最好；
 - 被 Cloudflare 硬封禁（页面提示 `You have been blocked`）时换会话无效，
   只能等冷却结束，通常换 IP 最快。

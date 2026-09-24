@@ -26,7 +26,7 @@ _DEFAULTS: dict[str, Any] = {
     "hltv_scheduler_jitter_seconds": 8,  # 每赛事 job 触发抖动，避免同刻并发
     "hltv_watermark_text": "Designed by Hakuchumu\nModified by M1z",  # 自定义水印文本
     "hltv_proxy_list": [],  # 代理列表
-    "hltv_impersonate": "chrome124",  # 浏览器指纹模拟（curl_cffi impersonate）
+    "hltv_impersonate": "chrome124",  # 浏览器指纹模拟（curl_cffi impersonate，不支持时自动回退）
     "hltv_flaresolverr_url": "",  # FlareSolverr 地址（可选）
     "hltv_superusers": [],  # 插件级超级用户 ID 列表
     "hltv_enable_map_result_push": True,  # 是否逐图播报（非 BO1 每张地图打完播报一次）

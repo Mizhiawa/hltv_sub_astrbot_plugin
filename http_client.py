@@ -79,6 +79,9 @@ _FS_RECOVERABLE_MARKERS = (
 # 瞬时网络错误的重试次数（连接抖动 / 5xx），与挑战处理无关
 _TRANSIENT_RETRIES = 2
 
+# 配置的 impersonate 不被当前 curl_cffi 支持时，按顺序尝试这些已知可用的档位
+_IMPERSONATE_FALLBACKS = ("chrome124", "chrome120", "chrome116", "chrome110")
+
 
 class HLTVFetchError(Exception):
     """HLTV 暂时不可访问（含冷却信息），供上层决定如何提示用户"""
@@ -140,6 +143,61 @@ def _chrome_version_from_ua(user_agent: str) -> str:
     return match.group(1) if match else ""
 
 
+def _impersonate_is_supported(name: str) -> Optional[bool]:
+    """判断 impersonate 名称是否被当前 curl_cffi 支持
+
+    curl_cffi 直到真正发请求时才抛 ImpersonateError，构造阶段不校验；
+    这里用它的 BrowserType 枚举提前判定。返回 None 表示无法判断
+    （curl_cffi 内部结构变了），此时按「可用」处理，交给运行期兜底。
+    """
+    try:
+        from curl_cffi.requests.impersonate import BrowserType
+    except Exception:
+        return None
+    try:
+        return hasattr(BrowserType, name)
+    except Exception:
+        return None
+
+
+# Referer 推导规则（按 HLTV 的实际站点层级）：子页面在真实浏览器里
+# 是从它的上一级页面点进去的，所以 Referer 应该是那一级而不是站点根。
+# 规则锚定整条路径、用 pattern.sub 做整串替换（\1 为捕获组反向引用），
+# 这样「固定替换串」和「保留捕获组」两种规则能统一处理。
+_REFERER_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    # /events/{id}/matches 由赛事页的比赛标签进入
+    (re.compile(r"^(/events/\d+)/matches/?$"), r"\1"),
+    # /events/{id}/{slug} 由赛事列表进入
+    (re.compile(r"^/events/\d+/[^/]+/?$"), "/events"),
+    # /matches/{id}/... 来自结果页
+    (re.compile(r"^/matches/.*$"), "/results"),
+)
+
+
+def _navigation_headers(url: str) -> dict[str, str]:
+    """站内导航上下文：子页面是站内跳转，根路径才是地址栏全新导航"""
+    parts = urlsplit(url)
+    path = parts.path
+    if path in ("", "/"):
+        return {"Sec-Fetch-Site": "none"}
+
+    referer_path = "/"
+    for pattern, repl in _REFERER_RULES:
+        if pattern.match(path):
+            referer_path = pattern.sub(repl, path, count=1)
+            break
+
+    # 避免自己引用自己
+    if referer_path == path:
+        referer_path = "/"
+
+    origin = f"{parts.scheme}://{parts.netloc}"
+    return {
+        "Sec-Fetch-Site": "same-origin",
+        "Referer": origin + referer_path,
+    }
+
+
 def _build_headers(
     impersonate: str, url: str, user_agent: str = ""
 ) -> dict[str, str]:
@@ -150,20 +208,20 @@ def _build_headers(
     Sec-Ch-Ua 系列也同步按该 UA 推导，否则「Linux 的 UA + Windows 的
     sec-ch-ua-platform」本身就是 Cloudflare 会抓的不一致。
 
-    导航上下文按目标 URL 推导 —— 站内子页面在真实浏览器里是站内跳转
-    （same-origin + Referer），一律声明成地址栏全新导航反而是异常信号。
+    ``user_agent`` 为空时**只返回导航上下文这一小组头**，其余交给 curl_cffi
+    按 impersonate 目标生成 —— UA、Sec-Ch-Ua、Accept 等必须与 TLS/HTTP2
+    指纹出自同一个浏览器档案。手工覆盖它们的典型后果是「声明 Windows、
+    指纹却是 macOS」，这正是 Cloudflare 打分时会看的自相矛盾。
     """
+    nav = _navigation_headers(url)
+
+    if not user_agent:
+        return nav
+
     chrome_version = _chrome_version_from_ua(user_agent) or _chrome_hint_version(
         impersonate
     )
-    if user_agent:
-        platform, mobile = _platform_from_ua(user_agent)
-    else:
-        user_agent = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            f"(KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36"
-        )
-        platform, mobile = '"Windows"', "?0"
+    platform, mobile = _platform_from_ua(user_agent)
 
     headers = {
         "User-Agent": user_agent,
@@ -178,14 +236,7 @@ def _build_headers(
         "Sec-Fetch-User": "?1",
         "Upgrade-Insecure-Requests": "1",
     }
-
-    parts = urlsplit(url)
-    if parts.path in ("", "/"):
-        headers["Sec-Fetch-Site"] = "none"
-    else:
-        headers["Sec-Fetch-Site"] = "same-origin"
-        headers["Referer"] = f"{parts.scheme}://{parts.netloc}/"
-
+    headers.update(nav)
     return headers
 
 
@@ -272,6 +323,8 @@ class HLTVHttpClient:
         self._cooldown = cooldown
         self._max_cooldown = max_cooldown
         self._session: Optional[AsyncSession] = None
+        # 运行期确认不支持的 impersonate 档位（curl_cffi 只在发请求时校验）
+        self._unsupported_impersonate: set[str] = set()
 
         # 状态持久化（冷却状态 + FlareSolverr 会话 + cf_clearance）
         self._state_dir = Path(state_dir) if state_dir else None
@@ -513,9 +566,59 @@ class HLTVHttpClient:
         except Exception as e:
             logger.debug(f"[HLTV] 写入 cf_clearance 失败: {e}")
 
+    def _create_session(self) -> AsyncSession:
+        """创建带指纹的会话
+
+        curl_cffi 直到发请求时才校验 impersonate 名称（构造阶段不报错），
+        因此这里先用 BrowserType 枚举筛掉不支持的档位。若用户按提示填了
+        更新的指纹而宿主 curl_cffi 版本偏旧，插件会逐级回退而不是整体不可用。
+        """
+        candidates = [self._impersonate, *_IMPERSONATE_FALLBACKS]
+        seen: set[str] = set()
+        for name in candidates:
+            if not name or name in seen or name in self._unsupported_impersonate:
+                continue
+            seen.add(name)
+
+            if _impersonate_is_supported(name) is False:
+                if name == self._impersonate:
+                    logger.warning(
+                        f"[HLTV] 当前 curl_cffi 不支持 impersonate={name}，尝试回退"
+                    )
+                continue
+
+            try:
+                session = AsyncSession(impersonate=name)
+            except Exception as e:
+                logger.warning(f"[HLTV] 创建会话失败 impersonate={name}: {e}")
+                continue
+
+            if name != self._impersonate:
+                logger.warning(
+                    f"[HLTV] impersonate={self._impersonate} 不可用，已回退到 {name}"
+                )
+                self._impersonate = name
+            logger.info(f"[HLTV] 会话已创建 impersonate={name}")
+            return session
+
+        logger.error(
+            "[HLTV] 没有可用的浏览器指纹，改用无指纹会话"
+            "（被 Cloudflare 拦截的概率会明显升高，建议检查 hltv_impersonate 配置）"
+        )
+        return AsyncSession()
+
+    async def _reset_session(self) -> None:
+        """丢弃当前会话（换指纹或换通行证后重建）"""
+        session, self._session = self._session, None
+        if session is not None:
+            try:
+                await session.close()
+            except Exception:
+                pass
+
     async def _get_session(self) -> AsyncSession:
         if self._session is None:
-            self._session = AsyncSession(impersonate=self._impersonate)
+            self._session = self._create_session()
             self._apply_clearance(self._session)
         return self._session
 
@@ -792,16 +895,38 @@ class HLTVHttpClient:
 
     async def _request_curl(self, url: str) -> FetchResult:
         """一次 curl_cffi 直连请求（不含重试）；挑战页归类为 cf_challenge"""
-        session = await self._get_session()
         proxy = self._pick_proxy()
         headers = _build_headers(self._impersonate, url, self._effective_clearance_ua())
 
-        response = await session.get(
-            url,
-            proxy=proxy,
-            timeout=self._timeout,
-            headers=headers,
-        )
+        response = None
+        for rebuilt in (False, True):
+            session = await self._get_session()
+            try:
+                response = await session.get(
+                    url,
+                    proxy=proxy,
+                    timeout=self._timeout,
+                    headers=headers,
+                )
+                break
+            except Exception as e:
+                # 运行期兜底：curl_cffi 只在发请求时才校验 impersonate，
+                # 标记该档位不可用并换一个可用指纹重试一次。
+                if rebuilt or "Impersonate" not in type(e).__name__:
+                    raise
+                logger.warning(
+                    f"[HLTV] impersonate={self._impersonate} 不被支持"
+                    f"（{e}），换用其它指纹重试"
+                )
+                self._unsupported_impersonate.add(self._impersonate)
+                await self._reset_session()
+                headers = _build_headers(
+                    self._impersonate, url, self._effective_clearance_ua()
+                )
+
+        if response is None:
+            # 循环里要么 break 要么抛出，正常到不了这里
+            return FetchResult(text=None, error="session_rebuild_failed")
 
         status = response.status_code
         body = response.text or ""
