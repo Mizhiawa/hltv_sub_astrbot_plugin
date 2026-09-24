@@ -42,7 +42,7 @@ async def handle_results_list(plugin, event):
                 results_by_event[event_key] = results
 
         if not results_by_event:
-            yield event.plain_result(paused_message() or "暂无比赛结果")
+            yield event.plain_result(paused_message("results") or "暂无比赛结果")
             event.stop_event()
             return
 

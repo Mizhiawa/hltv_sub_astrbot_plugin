@@ -50,7 +50,7 @@ async def handle_matches_list(plugin, event):
                         upcoming_count += 1
 
         if not matches_by_event:
-            yield event.plain_result(paused_message() or "暂无比赛")
+            yield event.plain_result(paused_message("matches") or "暂无比赛")
             event.stop_event()
             return
 

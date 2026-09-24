@@ -41,7 +41,7 @@ async def handle_event_list(plugin, event):
         events = await hltv_data.get_big_events()
 
         if not events:
-            yield event.plain_result(paused_message() or "暂无赛事数据")
+            yield event.plain_result(paused_message("events") or "暂无赛事数据")
             event.stop_event()
             return
 

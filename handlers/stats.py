@@ -50,7 +50,7 @@ async def handle_stats(plugin, event):
                     event.stop_event()
                     return
 
-            yield event.plain_result(paused_message() or "暂无比赛数据")
+            yield event.plain_result(paused_message("matches") or "暂无比赛数据")
             event.stop_event()
         except Exception as e:
             logger.error(f"获取比赛数据失败: {e}")
@@ -95,7 +95,7 @@ async def handle_stats(plugin, event):
                 event.stop_event()
             else:
                 yield event.plain_result(
-                    paused_message() or f"无法获取比赛 #{match_id} 的数据"
+                    paused_message("matches") or f"无法获取比赛 #{match_id} 的数据"
                 )
                 event.stop_event()
         except Exception as e:

@@ -88,9 +88,13 @@ class HLTVDataSource:
         """插件启动时调用：准备浏览器会话（不访问 HLTV 页面）"""
         await self._client.start()
 
-    def pause_info(self) -> tuple[str, float]:
-        """当前是否处于访问冷却 (原因, 可重试时间戳)；未冷却时为 ("", 0.0)"""
-        return self._client.pause_info()
+    def pause_info(self, scope: str = "") -> tuple[str, float]:
+        """当前是否处于访问冷却 (原因, 可重试时间戳)；未冷却时为 ("", 0.0)
+
+        ``scope`` 用于按路径隔离冷却状态（见 http_client._scope_for_url）：
+        matches 被 Cloudflare 挑战时，events / results 仍可正常工作。
+        """
+        return self._client.pause_info(scope)
 
     async def close(self):
         """关闭会话"""
@@ -328,12 +332,13 @@ class HLTVDataSource:
 hltv_data = HLTVDataSource()
 
 
-def paused_message() -> str:
-    """当前处于访问冷却时返回提示文案，否则返回空串
+def paused_message(scope: str = "") -> str:
+    """指定作用域处于访问冷却时返回提示文案，否则返回空串
 
     有了它，命令就不会把「被 Cloudflare 拦截」错误地报成「暂无比赛」。
+    ``scope`` 传对应路径（matches / results / events）；不传则看全局。
     """
-    reason, retry_at = hltv_data.pause_info()
+    reason, retry_at = hltv_data.pause_info(scope)
     if not retry_at:
         return ""
 
@@ -345,5 +350,5 @@ def paused_message() -> str:
 
     return (
         f"⚠️ HLTV 拒绝了本次访问（{reason}）\n"
-        f"插件已自动暂停请求以免加重风控，预计 {when} 后恢复，请稍后再试。"
+        f"插件已自动暂停该接口的请求以免加重风控，预计 {when} 后恢复，请稍后再试。"
     )

@@ -154,6 +154,12 @@ docker run -d --name flaresolverr -p 8191:8191 --restart unless-stopped \
 递增，上限 2 小时），冷却期内直接快速失败、不再访问 HLTV，并在命令里给出
 「预计何时恢复」的提示，而不是笼统的「暂无比赛」。
 
+**冷却是按接口隔离的。** Cloudflare 的挑战规则按路径生效 —— 动态页（比赛列表
+`matches`）会被挑战，而赛事列表 `events`、结果列表 `results` 在 CDN 上有缓存、
+通常照常返回。因此 `matches` 被拦只会暂停 `matches`，`event列表` / `results`
+等命令可以继续正常使用。只有明确遇到硬封禁（页面提示 `You have been blocked`）
+时才停掉全部接口。
+
 冷却状态会持久化到数据目录（`http_state.json`），Bot 重启后依然生效。
 
 ### 3. 其他可调项

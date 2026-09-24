@@ -203,6 +203,25 @@ def _looks_like_cf_block(status_code: Optional[int], body: str) -> bool:
     return any(marker in head for marker in _CF_BLOCK_MARKERS)
 
 
+# 冷却作用域：Cloudflare 的挑战规则通常按路径生效 —— 动态页（比赛列表）
+# 会被挑战，而列表页（赛事列表）在 CDN 上有缓存、往往照常返回。因此冷却
+# 必须按作用域隔离，否则 matches 被拦会连带停掉本来正常的 events/results。
+_SCOPE_GLOBAL = "*"
+
+
+def _scope_for_url(url: str) -> str:
+    """按目标 URL 归类请求作用域，用于隔离冷却状态"""
+    path = urlsplit(url).path
+    if "matches" in path:
+        # /events/{id}/matches 与 /matches/{id}/... 都归入 matches
+        return "matches"
+    if path.startswith("/results"):
+        return "results"
+    if path.startswith("/events"):
+        return "events"
+    return "other"
+
+
 def _atomic_write_json(path: Path, payload: dict) -> None:
     """原子写 JSON：崩溃或断电时不会留下半截文件"""
     try:
@@ -269,10 +288,9 @@ class HLTVHttpClient:
         self._inflight: dict[str, asyncio.Task] = {}
         self._closed = False
 
-        # 冷却（熔断）状态
-        self._blocked_until = 0.0
-        self._blocks = 0
-        self._pause_reason = ""
+        # 冷却（熔断）状态：按作用域隔离，见 _scope_for_url
+        # scope -> {"until": float, "blocks": int, "reason": str}
+        self._cooldowns: dict[str, dict] = {}
 
         # FlareSolverr 会话状态：会话独立于 Bot 进程，重启后继续复用
         self._fs_client: Optional[httpx.AsyncClient] = None
@@ -300,14 +318,14 @@ class HLTVHttpClient:
             return
 
         state = _read_json(self._state_path)
-        self._blocked_until = float(state.get("blocked_until", 0.0) or 0.0)
-        self._blocks = int(state.get("blocks", 0) or 0)
-        self._pause_reason = str(state.get("pause_reason", "") or "")
-        if self._blocked_until > time.time():
-            logger.info(
-                f"[HLTV] 读取到未过期的访问冷却，恢复暂停 "
-                f"({self._pause_reason or '未知原因'}, 剩余 {self._blocked_until - time.time():.0f}s)"
-            )
+        self._cooldowns = self._parse_cooldowns(state)
+        now = time.time()
+        for scope, entry in self._cooldowns.items():
+            if entry["until"] > now:
+                logger.info(
+                    f"[HLTV] 读取到未过期的访问冷却 scope={scope} "
+                    f"({entry['reason'] or '未知原因'}, 剩余 {entry['until'] - now:.0f}s)"
+                )
 
         session_state = _read_json(self._session_state_path)
         self._fs_session_id = str(session_state.get("selected_session_id", "") or "")
@@ -326,16 +344,42 @@ class HLTVHttpClient:
                     f"[HLTV] 复用已保存的 Cloudflare 通行证，剩余 {expires - time.time():.0f}s"
                 )
 
+    def _parse_cooldowns(self, state: dict) -> dict[str, dict]:
+        """读取冷却状态；兼容早期的全局扁平格式（映射为全局作用域）"""
+        out: dict[str, dict] = {}
+
+        raw = state.get("cooldowns")
+        if isinstance(raw, dict):
+            for scope, entry in raw.items():
+                if not isinstance(scope, str) or not isinstance(entry, dict):
+                    continue
+                try:
+                    until = float(entry.get("until", 0.0) or 0.0)
+                    blocks = int(entry.get("blocks", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                out[scope] = {
+                    "until": until,
+                    "blocks": blocks,
+                    "reason": str(entry.get("reason", "") or ""),
+                }
+            return out
+
+        legacy_until = float(state.get("blocked_until", 0.0) or 0.0)
+        if legacy_until > time.time():
+            out[_SCOPE_GLOBAL] = {
+                "until": legacy_until,
+                "blocks": int(state.get("blocks", 0) or 0),
+                "reason": str(state.get("pause_reason", "") or ""),
+            }
+        return out
+
     def _save_state(self) -> None:
         if self._state_path is None:
             return
         _atomic_write_json(
             self._state_path,
-            {
-                "blocked_until": self._blocked_until,
-                "blocks": self._blocks,
-                "pause_reason": self._pause_reason,
-            },
+            {"cooldowns": self._cooldowns},
         )
 
     def _save_session_state(self) -> None:
@@ -357,46 +401,85 @@ class HLTVHttpClient:
             },
         )
 
-    # -------------------- 冷却（熔断） --------------------
+    # -------------------- 冷却（熔断，按作用域隔离） --------------------
 
-    def pause_info(self) -> tuple[str, float]:
-        """返回当前冷却状态 (原因, 可重试时间戳)；未冷却时为 ("", 0.0)"""
-        if self._blocked_until > time.time():
-            return self._pause_reason or "访问冷却中", self._blocked_until
-        return "", 0.0
+    def _active_cooldown(self, scope: str) -> Optional[dict]:
+        """取该作用域当前生效的冷却（全局冷却对所有作用域生效）"""
+        now = time.time()
+        for key in (scope, _SCOPE_GLOBAL):
+            entry = self._cooldowns.get(key)
+            if entry and entry["until"] > now:
+                return {**entry, "scope": key}
+        return None
 
-    def _check_pause(self) -> Optional[HLTVFetchError]:
-        if self._blocked_until > time.time():
+    def pause_info(self, scope: str = "") -> tuple[str, float]:
+        """返回冷却状态 (原因, 可重试时间戳)；未冷却时为 ("", 0.0)
+
+        不传 scope 时：全局冷却优先，否则返回最晚解除的那个（保守估计，
+        避免把「马上能恢复」说得比实际乐观）。
+        """
+        if scope:
+            entry = self._active_cooldown(scope)
+            return (entry["reason"] or "访问冷却中", entry["until"]) if entry else ("", 0.0)
+
+        now = time.time()
+        active = [e for e in self._cooldowns.values() if e["until"] > now]
+        if not active:
+            return "", 0.0
+
+        global_entry = self._cooldowns.get(_SCOPE_GLOBAL)
+        if global_entry and global_entry["until"] > now:
+            return global_entry["reason"] or "访问冷却中", global_entry["until"]
+
+        latest = max(active, key=lambda e: e["until"])
+        return latest["reason"] or "访问冷却中", latest["until"]
+
+    def _check_pause(self, scope: str) -> Optional[HLTVFetchError]:
+        entry = self._active_cooldown(scope)
+        if entry:
             return HLTVFetchError(
-                self._pause_reason or "访问冷却中", retry_at=self._blocked_until
+                entry["reason"] or "访问冷却中", retry_at=entry["until"]
             )
         return None
 
-    def _pause(self, reason: str, *, blocked: bool = True) -> HLTVFetchError:
-        """进入冷却：连续被拦时指数退避，避免持续打同一出口 IP"""
+    def _pause(
+        self, reason: str, *, scope: str, blocked: bool = True
+    ) -> HLTVFetchError:
+        """在指定作用域进入冷却：连续被拦时指数退避，避免持续打同一出口 IP"""
+        entry = self._cooldowns.setdefault(
+            scope, {"until": 0.0, "blocks": 0, "reason": ""}
+        )
         if blocked:
-            self._blocks += 1
+            entry["blocks"] = int(entry.get("blocks", 0)) + 1
             delay = min(
-                self._cooldown * 2 ** min(self._blocks - 1, 20), self._max_cooldown
+                self._cooldown * 2 ** min(entry["blocks"] - 1, 20), self._max_cooldown
             )
         else:
             # 非拦截类故障（如网络中断）给一个短冷却，防止请求风暴
             delay = min(60, self._cooldown)
-        self._blocked_until = time.time() + delay
-        self._pause_reason = reason
+
+        entry["until"] = time.time() + delay
+        entry["reason"] = reason
         self._save_state()
         logger.warning(
-            f"[HLTV] 进入冷却 reason={reason} blocks={self._blocks} delay={delay}s"
+            f"[HLTV] 进入冷却 scope={scope} reason={reason} "
+            f"blocks={entry['blocks']} delay={delay}s"
         )
-        return HLTVFetchError(reason, retry_at=self._blocked_until)
+        return HLTVFetchError(reason, retry_at=entry["until"])
 
-    def _note_success(self) -> None:
-        if self._blocked_until or self._blocks:
-            logger.info("[HLTV] 请求恢复成功，重置冷却计数")
-        self._blocked_until = 0.0
-        self._blocks = 0
-        self._pause_reason = ""
-        self._save_state()
+    def _note_success(self, scope: str) -> None:
+        """请求成功说明该链路可用：清掉本作用域与全局的冷却计数"""
+        cleared = False
+        for key in (scope, _SCOPE_GLOBAL):
+            entry = self._cooldowns.get(key)
+            if entry and (entry["until"] or entry["blocks"]):
+                entry["until"] = 0.0
+                entry["blocks"] = 0
+                entry["reason"] = ""
+                cleared = True
+        if cleared:
+            logger.info(f"[HLTV] scope={scope} 请求恢复成功，重置冷却计数")
+            self._save_state()
 
     # -------------------- 请求节流 --------------------
 
@@ -437,13 +520,13 @@ class HLTVHttpClient:
         return self._session
 
     async def start(self) -> None:
-        """准备浏览器会话（若配置了 FlareSolverr），不访问 HLTV 页面"""
+        """准备浏览器会话（若配置了 FlareSolverr），不访问 HLTV 页面
+
+        只和本机 FlareSolverr 通信，不碰 HLTV，所以不受任何作用域冷却影响。
+        """
         if not self._flaresolverr_url:
             return
         async with self._lock:
-            exc = self._check_pause()
-            if exc:
-                raise exc
             await self._prepare_fs_session()
 
     async def close(self) -> None:
@@ -750,13 +833,15 @@ class HLTVHttpClient:
             text=None, status_code=status, final_url=final_url, error=f"http_{status}"
         )
 
-    async def _fetch_direct(self, url: str) -> FetchResult:
+    async def _fetch_direct(self, url: str, scope: str) -> FetchResult:
         """快速路径 + 瞬时故障重试 + 挑战兜底
 
         - 挑战页：不重试（重试只会加重风控），交 FlareSolverr；
         - 瞬时错误（超时 / 5xx / 网络抖动）：小退避重试；
         - 挑战求解后若拿到了通行证，再试一次快速路径 ——
           这一步让「一次浏览器求解」换来之后一批请求的低延迟。
+
+        失败时只在 ``scope`` 作用域内冷却，不影响其它路径的正常查询。
         """
         result = FetchResult(text=None, error="not_attempted")
 
@@ -776,7 +861,8 @@ class HLTVHttpClient:
                 break
 
         if result.error == "cf_block":
-            raise self._pause("出口 IP 被 Cloudflare 封禁")
+            # 硬封禁对整个出口 IP 生效，因此冷却全局作用域
+            raise self._pause("出口 IP 被 Cloudflare 封禁", scope=_SCOPE_GLOBAL)
 
         if result.error != "cf_challenge":
             return result
@@ -798,10 +884,11 @@ class HLTVHttpClient:
 
         if fs_result.error == "flaresolverr_not_configured":
             raise self._pause(
-                "命中 Cloudflare 挑战且未配置 FlareSolverr（建议配置后重试）"
+                "命中 Cloudflare 挑战且未配置 FlareSolverr（建议配置后重试）",
+                scope=scope,
             )
 
-        raise self._pause("Cloudflare 挑战未通过")
+        raise self._pause("Cloudflare 挑战未通过", scope=scope)
 
     # -------------------- 对外接口 --------------------
 
@@ -844,12 +931,13 @@ class HLTVHttpClient:
             # 已有一模一样的请求在跑，等它的结果，不重复打 HLTV
             return await asyncio.shield(task)
 
-        exc = self._check_pause()
+        scope = _scope_for_url(url)
+        exc = self._check_pause(scope)
         if exc:
-            logger.info(f"[HLTV] 冷却中跳过请求: {url} ({exc.reason})")
+            logger.info(f"[HLTV] 冷却中跳过请求: {url} (scope={scope}, {exc.reason})")
             return FetchResult(text=None, error=f"paused: {exc.reason}", paused=True)
 
-        task = asyncio.create_task(self._fetch_and_cache(url, key, ttl))
+        task = asyncio.create_task(self._fetch_and_cache(url, key, ttl, scope))
         self._inflight[key] = task
         task.add_done_callback(lambda done: self._finish(key, done))
         return await asyncio.shield(task)
@@ -861,15 +949,15 @@ class HLTVHttpClient:
             task.exception()
 
     async def _fetch_and_cache(
-        self, url: str, key: str, ttl: float
+        self, url: str, key: str, ttl: float, scope: str
     ) -> FetchResult:
         async with self._lock:
-            exc = self._check_pause()
+            exc = self._check_pause(scope)
             if exc:
                 return FetchResult(text=None, error=f"paused: {exc.reason}", paused=True)
 
             try:
-                result = await self._fetch_direct(url)
+                result = await self._fetch_direct(url, scope)
             except HLTVFetchError as e:
                 # FlareSolverr 侧抛出的错误没有经过 _pause()，这里补上熔断，
                 # 否则「挑战解不掉」会变成每次请求都重新打一遍 HLTV。
@@ -879,7 +967,7 @@ class HLTVHttpClient:
                     blocked = any(
                         k in e.reason for k in ("Cloudflare", "挑战", "封禁")
                     )
-                    self._pause(e.reason, blocked=blocked)
+                    self._pause(e.reason, scope=scope, blocked=blocked)
                 return FetchResult(
                     text=None, error=f"paused: {e.reason}", paused=True
                 )
@@ -887,7 +975,7 @@ class HLTVHttpClient:
             if not result.text:
                 return result
 
-            self._note_success()
+            self._note_success(scope)
 
             if ttl > 0:
                 self._cache[key] = (time.monotonic() + ttl, result)
