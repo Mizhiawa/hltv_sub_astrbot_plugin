@@ -102,7 +102,11 @@ Windows / macOS 自带中文字体，无需处理。
 | --- | --- | --- |
 | `hltv_timezone` | `Asia/Shanghai` | 比赛时间显示时区 |
 | `hltv_timeout` | `15` | 请求超时（秒） |
-| `hltv_min_delay` | `5.0` | 重试延迟基数（秒） |
+| `hltv_request_interval_seconds` | `8.0` | 任意两次访问 HLTV 的最小间隔。**调大它是最有效的防封手段**（建议 8~15） |
+| `hltv_block_cooldown_seconds` | `600` | 被 Cloudflare 拦截后首次冷却时长（秒） |
+| `hltv_block_cooldown_max_seconds` | `7200` | 连续被拦截时冷却时间的上限（秒） |
+| `hltv_flaresolverr_timeout_seconds` | `60` | 单次浏览器求解超时（秒） |
+| `hltv_min_delay` | `5.0` | **已废弃**，保留仅为兼容旧配置 |
 | `hltv_scheduler_max_parallel` | `3` | 多赛事轮询并发上限 |
 | `hltv_scheduler_jitter_seconds` | `8` | 轮询抖动（秒），防同刻并发 |
 | `hltv_auto_unsub_delay_days` | `2` | 赛事结束后延迟自动退订天数 |
@@ -110,9 +114,56 @@ Windows / macOS 自带中文字体，无需处理。
 | `hltv_watermark_text` | `Designed by Hakuchumu\nModified by M1z` | 图片水印 |
 | `hltv_proxy_list` | `[]` | 代理列表，如 `["http://127.0.0.1:7890"]` |
 | `hltv_impersonate` | `chrome124` | curl_cffi 浏览器指纹 |
-| `hltv_flaresolverr_url` | 空 | FlareSolverr 地址（Cloudflare 回退，可选） |
+| `hltv_flaresolverr_url` | 空 | FlareSolverr 地址（**强烈建议配置**，见下方排障） |
 | `hltv_superusers` | `[]` | 插件级超级用户 ID（调试命令用；留空回退 AstrBot `admins_id`） |
 | `hltv_enable_map_result_push` | `true` | 非 BO1 比赛逐图播报开关。关闭后每打完一张地图不再播报，仅保留开赛提醒与整场结果推送 |
+
+## 排障：`matches` 报 403 / 一直「暂无比赛」
+
+HLTV 前面是 Cloudflare。`event列表` 这类页面在 CDN 上有缓存、不带挑战，而
+`matches`（比赛列表）走的是动态页面，会优先命中 Cloudflare 的**交互式挑战**：
+返回 `403` 和一个 `Just a moment...` 页面，要求浏览器执行 JS 并带回
+`cf_clearance` cookie。
+
+**这类挑战改请求头是解不掉的** —— 它需要真的有一个浏览器去执行 JS。所以：
+
+### 1. 配置 FlareSolverr（推荐，一劳永逸）
+
+```bash
+docker run -d --name flaresolverr -p 8191:8191 --restart unless-stopped \
+  ghcr.io/flaresolverr/flaresolverr:latest
+```
+
+然后在插件配置里填 `hltv_flaresolverr_url = http://127.0.0.1:8191/v1`。
+
+配置后插件的处理流程是：
+
+1. 平时仍用 curl_cffi 直连（快、省资源）；
+2. 一旦命中挑战，改为让 FlareSolverr 用**持久浏览器会话**求解；
+3. 求解成功后，把它拿到的 `cf_clearance` 及其配套 User-Agent 回灌给
+   curl_cffi 会话并**存到磁盘**，之后一段时间的请求重新走快速路径 ——
+   也就是说一次浏览器求解能覆盖之后的一批请求，而不是每个请求都开浏览器；
+4. 浏览器崩溃或挑战反复失败时自动**更换会话**重试（最多一次）。
+
+> ⚠️ FlareSolverr 必须与插件在**同一出口 IP** 上（`cf_clearance` 与 IP 绑定）。
+> 若插件配了代理，FlareSolverr 也要能走同一个代理，否则回灌的通行证无效。
+
+### 2. 没配 FlareSolverr 时
+
+插件不会再硬撞：命中挑战会立刻停止重试并进入冷却（首次 600 秒，连续被拦按倍数
+递增，上限 2 小时），冷却期内直接快速失败、不再访问 HLTV，并在命令里给出
+「预计何时恢复」的提示，而不是笼统的「暂无比赛」。
+
+冷却状态会持久化到数据目录（`http_state.json`），Bot 重启后依然生效。
+
+### 3. 其他可调项
+
+- 把 `hltv_request_interval_seconds` 调大（8 → 15）能明显降低被拦概率；
+- 把 `hltv_impersonate` 换成更新的指纹（如 `chrome131`）有时也有效；
+- 出口 IP 是机房 IP 时更容易被拦，`hltv_proxy_list` 配住宅代理效果最好；
+- 被 Cloudflare 硬封禁（页面提示 `You have been blocked`）时换会话无效，
+  只能等冷却结束，通常换 IP 最快。
+
 
 ### 第 6 步：验证
 

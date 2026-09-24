@@ -42,15 +42,17 @@ class HltvSubPlugin(Star):
         # 注入运行时配置（供模块级代码读取）
         configure(config)
 
-        # 按注入后的配置重建数据源（时区/超时/代理等）
-        hltv_data.reconfigure()
-
-        self._init_task: Optional[asyncio.Task] = None
-
         # 初始化数据目录与图片临时目录
         plugin_name = getattr(self, "name", None) or "hltv_sub"
         data_dir = Path(get_astrbot_data_path()) / "plugin_data" / plugin_name
         data_manager.set_data_dir(data_dir)
+
+        # 按注入后的配置重建数据源（时区/超时/代理等）
+        # 必须在数据目录注入之后：HTTP 客户端的冷却状态与
+        # Cloudflare 通行证就存放在该目录下。
+        hltv_data.reconfigure()
+
+        self._init_task: Optional[asyncio.Task] = None
 
         images_dir = data_dir / "images"
         init_images_dir(str(images_dir))
@@ -168,6 +170,13 @@ class HltvSubPlugin(Star):
 
     async def initialize(self) -> None:
         """插件激活时调用：启动定时任务并执行延迟初始化"""
+        # 提前准备浏览器会话（仅当配置了 FlareSolverr 时才真正动作），
+        # 这样第一次查询就走在「已就绪」的路径上。
+        try:
+            await hltv_data.start()
+        except Exception as e:
+            logger.warning(f"HTTP 会话准备未完成，后续轮询会自动恢复: {e}")
+
         await start_scheduler_async()
         self._init_task = asyncio.create_task(delayed_init())
 

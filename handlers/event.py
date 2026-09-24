@@ -12,7 +12,7 @@ import re
 from astrbot.api import logger
 
 from ..data_manager import EventSubscription, data_manager
-from ..data_source import hltv_data
+from ..data_source import hltv_data, paused_message
 from ..image_utils import image_segment
 from ..permissions import check_permission, is_group_enabled
 from ..render import render_events
@@ -41,7 +41,7 @@ async def handle_event_list(plugin, event):
         events = await hltv_data.get_big_events()
 
         if not events:
-            yield event.plain_result("暂无赛事数据")
+            yield event.plain_result(paused_message() or "暂无赛事数据")
             event.stop_event()
             return
 

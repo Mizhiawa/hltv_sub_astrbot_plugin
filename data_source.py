@@ -10,12 +10,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 import pytz
 from bs4 import BeautifulSoup
 
 from .config import plugin_config
+from .data_manager import data_manager
 from .http_client import FetchResult, HLTVHttpClient
 from .log_utils import get_logger
 from .models import (
@@ -42,6 +44,17 @@ class EventMatchesMeta:
     match_link_count: int = 0
     is_unavailable: bool = False
     unavailable_reason: str = ""
+    is_paused: bool = False
+
+
+# 各类页面的缓存时长（秒）。轮询间隔最短 3 分钟，因此这里的 TTL 不会
+# 让调度器读到过期数据，却能挡住「同一条命令连按两次」和
+# 「多个群/多个赛事同时查询」造成的重复请求。
+_CACHE_TTL_EVENTS = 1800
+_CACHE_TTL_EVENT_INFO = 1800
+_CACHE_TTL_MATCHES = 120
+_CACHE_TTL_RESULTS = 120
+_CACHE_TTL_STATS = 60
 
 
 class HLTVDataSource:
@@ -56,10 +69,14 @@ class HLTVDataSource:
     def _build_client(self) -> HLTVHttpClient:
         return HLTVHttpClient(
             timeout=plugin_config.hltv_timeout,
-            min_delay=plugin_config.hltv_min_delay,
+            request_interval=plugin_config.hltv_request_interval_seconds,
             proxy_list=plugin_config.hltv_proxy_list,
             impersonate=plugin_config.hltv_impersonate,
             flaresolverr_url=plugin_config.hltv_flaresolverr_url,
+            flaresolverr_timeout=plugin_config.hltv_flaresolverr_timeout_seconds,
+            cooldown=plugin_config.hltv_block_cooldown_seconds,
+            max_cooldown=plugin_config.hltv_block_cooldown_max_seconds,
+            state_dir=data_manager.data_dir,
         )
 
     def reconfigure(self) -> None:
@@ -67,13 +84,23 @@ class HLTVDataSource:
         self._tz = pytz.timezone(plugin_config.hltv_timezone)
         self._client = self._build_client()
 
+    async def start(self) -> None:
+        """插件启动时调用：准备浏览器会话（不访问 HLTV 页面）"""
+        await self._client.start()
+
+    def pause_info(self) -> tuple[str, float]:
+        """当前是否处于访问冷却 (原因, 可重试时间戳)；未冷却时为 ("", 0.0)"""
+        return self._client.pause_info()
+
     async def close(self):
         """关闭会话"""
         await self._client.close()
 
     async def get_big_events(self) -> list[EventInfo]:
         """获取 Big Events（正在进行 + 即将举行的赛事）"""
-        html = await self._client.fetch(f"{self.BASE_URL}/events")
+        html = await self._client.fetch(
+            f"{self.BASE_URL}/events", cache_key="events", ttl=_CACHE_TTL_EVENTS
+        )
         if not html:
             return []
         return parse_big_events(html, self._tz)
@@ -83,7 +110,9 @@ class HLTVDataSource:
         title_slug = event_title.lower().replace(" ", "-") if event_title else "event"
         url = f"{self.BASE_URL}/events/{event_id}/{title_slug}"
 
-        html = await self._client.fetch(url)
+        html = await self._client.fetch(
+            url, cache_key=f"event:{event_id}", ttl=_CACHE_TTL_EVENT_INFO
+        )
         if not html:
             return None
 
@@ -107,6 +136,12 @@ class HLTVDataSource:
             match_wrapper_count=len(wrappers),
             match_link_count=len(links),
         )
+
+        if fetch_result.paused:
+            meta.is_unavailable = True
+            meta.is_paused = True
+            meta.unavailable_reason = "paused"
+            return meta
 
         if status is None:
             return meta
@@ -141,7 +176,9 @@ class HLTVDataSource:
     ) -> tuple[list[MatchInfo], list[MatchTimeHint], EventMatchesMeta]:
         """获取赛事比赛列表 + 时间提示 + 页面元信息"""
         url = f"{self.BASE_URL}/events/{event_id}/matches"
-        fetch_result = await self._client.fetch_with_meta(url)
+        fetch_result = await self._client.fetch_with_meta(
+            url, cache_key=f"matches:{event_id}", ttl=_CACHE_TTL_MATCHES
+        )
         if not fetch_result.text:
             meta = self._analyze_matches_meta(event_id, fetch_result, None)
             if not meta.unavailable_reason:
@@ -203,11 +240,21 @@ class HLTVDataSource:
         return matches
 
     async def get_event_results(
-        self, event_id: str, days: int = 7, max_results: int = 20
+        self,
+        event_id: str,
+        days: int = 7,
+        max_results: int = 20,
+        *,
+        force_refresh: bool = False,
     ) -> list[ResultInfo]:
         """获取赛事的已结束比赛结果"""
         url = f"{self.BASE_URL}/results?event={event_id}"
-        html = await self._client.fetch(url)
+        html = await self._client.fetch(
+            url,
+            cache_key=f"results:{event_id}",
+            ttl=_CACHE_TTL_RESULTS,
+            force_refresh=force_refresh,
+        )
         if not html:
             logger.warning(f"[HLTV][RESULTS] fetch_empty event={event_id} url={url}")
             return []
@@ -230,7 +277,9 @@ class HLTVDataSource:
         url = f"{self.BASE_URL}/matches/{match_id}/{t1_slug}-vs-{t2_slug}-{event_slug}"
         logger.info(f"[HLTV][STATS] fetch_start match_id={match_id} url={url}")
 
-        html = await self._client.fetch(url)
+        html = await self._client.fetch(
+            url, cache_key=f"stats:{match_id}", ttl=_CACHE_TTL_STATS
+        )
         if not html:
             logger.warning(f"[HLTV][STATS] fetch_empty match_id={match_id} url={url}")
             return None
@@ -277,3 +326,24 @@ class HLTVDataSource:
 
 # 全局实例
 hltv_data = HLTVDataSource()
+
+
+def paused_message() -> str:
+    """当前处于访问冷却时返回提示文案，否则返回空串
+
+    有了它，命令就不会把「被 Cloudflare 拦截」错误地报成「暂无比赛」。
+    """
+    reason, retry_at = hltv_data.pause_info()
+    if not retry_at:
+        return ""
+
+    try:
+        tz = pytz.timezone(plugin_config.hltv_timezone)
+        when = datetime.fromtimestamp(retry_at, tz=tz).strftime("%m-%d %H:%M")
+    except Exception:
+        when = datetime.fromtimestamp(retry_at).strftime("%m-%d %H:%M")
+
+    return (
+        f"⚠️ HLTV 拒绝了本次访问（{reason}）\n"
+        f"插件已自动暂停请求以免加重风控，预计 {when} 后恢复，请稍后再试。"
+    )

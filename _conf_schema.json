@@ -2,14 +2,38 @@
   "hltv_min_delay": {
     "type": "float",
     "default": 5.0,
-    "name": "最小延迟（秒）",
-    "description": "请求重试时的延迟基数（秒）。"
+    "name": "最小延迟（秒，已废弃）",
+    "description": "已废弃：请改用「请求最小间隔」。保留该项仅为兼容旧配置。"
   },
   "hltv_timeout": {
     "type": "int",
     "default": 15,
     "name": "超时时间（秒）",
     "description": "HLTV 请求超时时间（秒）。"
+  },
+  "hltv_request_interval_seconds": {
+    "type": "float",
+    "default": 8.0,
+    "name": "请求最小间隔（秒）",
+    "description": "任意两次访问 HLTV 之间的最小间隔。调大可显著降低被 Cloudflare 拦截的概率，代价是查询变慢（建议 8~15）。"
+  },
+  "hltv_block_cooldown_seconds": {
+    "type": "int",
+    "default": 600,
+    "name": "被拦截后首次冷却（秒）",
+    "description": "被 Cloudflare 拦截后暂停访问的时长；连续被拦会按倍数递增。"
+  },
+  "hltv_block_cooldown_max_seconds": {
+    "type": "int",
+    "default": 7200,
+    "name": "冷却上限（秒）",
+    "description": "连续被拦截时冷却时间的上限。"
+  },
+  "hltv_flaresolverr_timeout_seconds": {
+    "type": "int",
+    "default": 60,
+    "name": "FlareSolverr 超时（秒）",
+    "description": "单次浏览器求解的超时时间；求解需要执行 JS 挑战，通常要 20~60 秒。"
   },
   "hltv_timezone": {
     "type": "string",
@@ -63,7 +87,7 @@
     "type": "string",
     "default": "",
     "name": "FlareSolverr 地址",
-    "description": "可选，Cloudflare 挑战回退。例如 http://localhost:8191/v1"
+    "description": "强烈建议配置。HLTV 的动态页面（比赛列表）会触发 Cloudflare 挑战，配置后可由 FlareSolverr 自动求解并通过 cf_clearance 复用，例如 http://127.0.0.1:8191/v1；需与插件运行在同一出口 IP 上。"
   },
   "hltv_superusers": {
     "type": "list",

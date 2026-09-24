@@ -7,7 +7,7 @@ from __future__ import annotations
 from astrbot.api import logger
 
 from ..data_manager import data_manager
-from ..data_source import hltv_data
+from ..data_source import hltv_data, paused_message
 from ..image_utils import image_segment
 from ..permissions import is_group_enabled
 from ..render import render_matches
@@ -50,7 +50,7 @@ async def handle_matches_list(plugin, event):
                         upcoming_count += 1
 
         if not matches_by_event:
-            yield event.plain_result("暂无比赛")
+            yield event.plain_result(paused_message() or "暂无比赛")
             event.stop_event()
             return
 

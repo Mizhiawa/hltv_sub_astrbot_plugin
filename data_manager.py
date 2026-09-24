@@ -87,6 +87,11 @@ class DataManager:
         if self._data_dir is not None:
             self._load()
 
+    @property
+    def data_dir(self) -> Optional[Path]:
+        """插件数据目录（尚未注入时为 None）"""
+        return self._data_dir
+
     def set_data_dir(self, data_dir: str | Path) -> None:
         """插件启动时注入数据目录（AstrBot 的 data/plugin_data/<plugin>/）并加载数据。
 

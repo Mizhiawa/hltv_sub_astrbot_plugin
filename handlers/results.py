@@ -7,7 +7,7 @@ from __future__ import annotations
 from astrbot.api import logger
 
 from ..data_manager import data_manager
-from ..data_source import hltv_data
+from ..data_source import hltv_data, paused_message
 from ..image_utils import image_segment
 from ..permissions import is_group_enabled
 from ..render import render_results
@@ -42,7 +42,7 @@ async def handle_results_list(plugin, event):
                 results_by_event[event_key] = results
 
         if not results_by_event:
-            yield event.plain_result("暂无比赛结果")
+            yield event.plain_result(paused_message() or "暂无比赛结果")
             event.stop_event()
             return
 

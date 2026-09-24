@@ -9,7 +9,7 @@ import re
 from astrbot.api import logger
 
 from ..data_manager import data_manager
-from ..data_source import hltv_data
+from ..data_source import hltv_data, paused_message
 from ..image_utils import image_segment
 from ..permissions import is_group_enabled
 from ..render import render_stats
@@ -50,7 +50,7 @@ async def handle_stats(plugin, event):
                     event.stop_event()
                     return
 
-            yield event.plain_result("暂无比赛数据")
+            yield event.plain_result(paused_message() or "暂无比赛数据")
             event.stop_event()
         except Exception as e:
             logger.error(f"获取比赛数据失败: {e}")
@@ -94,7 +94,9 @@ async def handle_stats(plugin, event):
                 yield event.image_result(image_segment(img))
                 event.stop_event()
             else:
-                yield event.plain_result(f"无法获取比赛 #{match_id} 的数据")
+                yield event.plain_result(
+                    paused_message() or f"无法获取比赛 #{match_id} 的数据"
+                )
                 event.stop_event()
         except Exception as e:
             logger.error(f"获取比赛数据失败: {e}")
