@@ -40,6 +40,10 @@ def _single_map_stats(
         map_stats_details={map_info.map_name: map_players},
         vetos=stats.vetos,
         event=stats.event,
+        stage=stats.stage,
+        team1_vrs_forecast=stats.team1_vrs_forecast,
+        team2_vrs_forecast=stats.team2_vrs_forecast,
+        vrs_invites=stats.vrs_invites,
     )
 
 

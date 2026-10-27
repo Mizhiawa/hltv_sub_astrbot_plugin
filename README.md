@@ -2,6 +2,7 @@
 https://github.com/HakuchumuHYX/HakuBot/tree/main
 原 NoneBot2 插件 [hltv_sub] 的由 Mizhiawa 修改的 AstrBot 移植版，**功能保持不变**：
 HLTV CS2 赛事订阅、比赛/结果/数据查询、开赛提醒与结果推送（含单图结果推送）。
+开赛提醒、单图与赛后推送附带赛段，以及 HLTV 的 VRS 预测/结算与 VRS 邀请概率（同步自 HakuBot 后续版本）。
 
 ## 命令
 

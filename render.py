@@ -531,6 +531,131 @@ def _result_item(draw, x: int, y: int, inner: int, r: ResultInfo) -> None:
 # -------------------- 渲染：比赛数据 --------------------
 
 
+# -------------------- VRS（开赛提醒与比赛数据共用） --------------------
+
+VRS_LINE = (60, 60, 84)
+FORECAST_CARD_H = 80
+VRS_RESULT_CARD_H = 56
+INVITE_HEAD_H = 26
+INVITE_ROW_H = 28
+MAX_INVITES = 3  # 页面最多八项，只列前三个
+
+
+def _show_live_vrs(stats: Optional[MatchStats]) -> bool:
+    """刚打完、HLTV 还没切到 result 时页面仍是 forecast，比赛结束后不再显示“胜/负之后”"""
+    return stats is not None and stats.status.lower() != "match over"
+
+
+def _has_forecast(stats: Optional[MatchStats]) -> bool:
+    return _show_live_vrs(stats) and bool(stats.team1_vrs_forecast or stats.team2_vrs_forecast)
+
+
+def _live_invites(stats: Optional[MatchStats]) -> list:
+    return stats.vrs_invites[:MAX_INVITES] if _show_live_vrs(stats) else []
+
+
+def _invites_h(invites) -> int:
+    return INVITE_HEAD_H + INVITE_ROW_H * len(invites) + 6
+
+
+def _delta_color(value: int):
+    return GREEN if value > 0 else RED if value < 0 else TEXT_DIM
+
+
+def _draw_segments(draw, x: int, cy: int, segments, align: str = "left") -> None:
+    """一行里不同字号/颜色的几段文字；align=right 时 x 是右边界"""
+    gap = 6
+    widths = [_text_width(draw, text, font) for text, font, _ in segments]
+    if align == "right":
+        x -= sum(widths) + gap * (len(segments) - 1)
+    for (text, font, color), w in zip(segments, widths):
+        _draw_text(draw, (x, cy), text, font, fill=color, anchor="lm")
+        x += w + gap
+
+
+def _forecast_side(draw, cx: int, y: int, forecast) -> None:
+    if forecast is None:
+        _draw_text(draw, (cx, y + FORECAST_CARD_H // 2), "VRS 未上榜", _font(13), fill=TEXT_DIM, anchor="mm")
+        return
+    _draw_text(draw, (cx, y + 16), f"VRS #{forecast.rank} · {forecast.points} pt", _font(13), fill=TEXT_DIM, anchor="mm")
+    rank_font = _font(15, bold=True)
+    for row, (label, new_rank, delta) in enumerate(
+        (("胜", forecast.win_rank, forecast.win_delta), ("负", forecast.lose_rank, forecast.lose_delta))
+    ):
+        ry = y + 40 + row * 24
+        segments = [(label, _font(13), TEXT_DIM), (f"#{new_rank}", rank_font, WHITE)]
+        move = forecast.rank - new_rank
+        if move:
+            segments.append((f"{'▲' if move > 0 else '▼'}{abs(move)}", _font(12), GREEN if move > 0 else RED))
+        _draw_segments(draw, cx - 70, ry, segments)
+        _draw_text(draw, (cx + 70, ry), f"{delta:+d}", rank_font, fill=_delta_color(delta), anchor="rm")
+
+
+def _draw_forecast(draw, x: int, y: int, inner: int, stats: MatchStats, centers: tuple[int, int], fill) -> None:
+    _rounded_card(draw, (x, y, x + inner, y + FORECAST_CARD_H), fill=fill, radius=8)
+    _forecast_side(draw, centers[0], y, stats.team1_vrs_forecast)
+    _forecast_side(draw, centers[1], y, stats.team2_vrs_forecast)
+
+
+def _invite_cells(draw, x: int, cy: int, cell_w: int, chance) -> None:
+    font = _font(14, bold=True)
+    centers = [x + cell_w // 2 + i * cell_w for i in range(3)]
+    _draw_text(draw, (centers[0], cy), chance.now.rstrip("%"), font, fill=WHITE, anchor="mm")
+    if chance.win == chance.lose:
+        label, value = _font(11), chance.win.rstrip("%")
+        total = _text_width(draw, "胜负均", label) + 4 + _text_width(draw, value, font)
+        _draw_segments(draw, (centers[1] + centers[2] - total) // 2, cy, [("胜负均", label, TEXT_DIM), (value, font, WHITE)])
+        return
+    for cx, value, color in ((centers[1], chance.win, GREEN), (centers[2], chance.lose, RED)):
+        _draw_text(draw, (cx, cy), value.rstrip("%"), font, fill=color if value != chance.now else WHITE, anchor="mm")
+
+
+def _draw_invites(draw, x: int, y: int, inner: int, invites, cell_w: int, fill) -> None:
+    """两队数据各在自己一侧（现在 / 胜 / 负），赛事名居中"""
+    _rounded_card(draw, (x, y, x + inner, y + _invites_h(invites)), fill=fill, radius=8)
+    side_w = cell_w * 3
+    left, right = x + 8, x + inner - 8 - side_w
+    mid_x, mid_w = (left + side_w + right) // 2, right - left - side_w - 16
+    head_cy = y + INVITE_HEAD_H // 2 + 2
+    for sx in (left, right):
+        for i, label in enumerate(("现在", "胜", "负")):
+            _draw_text(draw, (sx + cell_w // 2 + i * cell_w, head_cy), label, _font(11), fill=TEXT_DARK, anchor="mm")
+    _draw_text(draw, (mid_x, head_cy), "VRS 邀请概率 %（HLTV 模拟）", _font(11), fill=TEXT_DIM, anchor="mm")
+    name_font = _font(13, bold=True)
+    for i, invite in enumerate(invites):
+        ry = y + INVITE_HEAD_H + i * INVITE_ROW_H
+        draw.line([(x + 8, ry), (x + inner - 8, ry)], fill=VRS_LINE, width=1)
+        cy = ry + INVITE_ROW_H // 2
+        _invite_cells(draw, left, cy, cell_w, invite.team1)
+        _draw_text(draw, (mid_x, cy), _truncate(draw, invite.event, name_font, mid_w), name_font, fill=ORANGE, anchor="mm")
+        _invite_cells(draw, right, cy, cell_w, invite.team2)
+
+
+def _vrs_result_side(change) -> list:
+    move = change.rank_before - change.rank_after
+    move_text, move_color = (f"▲{move}", GREEN) if move > 0 else (f"▼{-move}", RED) if move < 0 else ("持平", TEXT_DIM)
+    rank_line = [
+        (f"#{change.rank_before} →", _font(13), TEXT_DIM),
+        (f"#{change.rank_after}", _font(16, bold=True), WHITE),
+        (move_text, _font(12), move_color),
+    ]
+    points_line = [
+        (f"{change.points_before} → {change.points_before + change.points_delta}", _font(12), TEXT_DIM),
+        (f"{change.points_delta:+d} pt", _font(12, bold=True), _delta_color(change.points_delta)),
+    ]
+    return [rank_line, points_line]
+
+
+def _draw_vrs_result(draw, x: int, y: int, inner: int, stats: MatchStats) -> None:
+    _rounded_card(draw, (x, y, x + inner, y + VRS_RESULT_CARD_H), fill=CARD_ALT, radius=8)
+    for row, (team1_line, team2_line) in enumerate(zip(_vrs_result_side(stats.team1_vrs), _vrs_result_side(stats.team2_vrs))):
+        cy = y + 18 + row * 22
+        _draw_segments(draw, x + 20, cy, team1_line)
+        _draw_segments(draw, x + inner - 20, cy, team2_line, align="right")
+    _draw_text(draw, (x + inner // 2, y + 18), "VRS", _font(14, bold=True), fill=ORANGE, anchor="mm")
+    _draw_text(draw, (x + inner // 2, y + 40), "HLTV 按本场估算", _font(11), fill=TEXT_DARK, anchor="mm")
+
+
 def _players_section_h(players) -> int:
     """选手数据区块高度：标题 + 列头 + 行数 + 间距"""
     n1 = len([p for p in players if p.team == "team1"])
@@ -556,9 +681,19 @@ async def render_stats(stats: Optional[MatchStats]) -> bytes:
     )
     show_total_overview = not has_single_map_details
     map_names = {m.map_name for m in stats.maps}
+    has_forecast = _has_forecast(stats)
+    invites = _live_invites(stats)
 
     # 高度预计算
     h = PAD + HEADER_H + 14 + 96 + 26
+    if stats.stage:
+        h += 24
+    if stats.team1_vrs:
+        h += VRS_RESULT_CARD_H + 12
+    if has_forecast:
+        h += FORECAST_CARD_H + 12
+    if invites:
+        h += _invites_h(invites) + 12
     if stats.vetos:
         h += 26 + 18 * len(stats.vetos) + 16 + 12
     if played_maps:
@@ -595,6 +730,21 @@ async def render_stats(stats: Optional[MatchStats]) -> bytes:
     _draw_text(draw, (width // 2, cy), score_text, _font(40, bold=True), fill=WHITE, anchor="mm")
     _draw_text(draw, (width // 2, y + 66), stats.status or "", _font(13), fill=TEXT_DIM, anchor="ma")
     y += 96
+
+    if stats.stage:
+        _draw_text(draw, (width // 2, y - 4), _truncate(draw, stats.stage, _font(13, bold=True), inner), _font(13, bold=True), fill=GOLD, anchor="ma")
+        y += 24
+
+    # VRS：赛后是 result，赛前赛中是 forecast 和邀请概率，页面只会给其中一种
+    if stats.team1_vrs:
+        _draw_vrs_result(draw, x, y, inner, stats)
+        y += VRS_RESULT_CARD_H + 12
+    if has_forecast:
+        _draw_forecast(draw, x, y, inner, stats, (x + inner // 4, x + inner * 3 // 4), CARD_ALT)
+        y += FORECAST_CARD_H + 12
+    if invites:
+        _draw_invites(draw, x, y, inner, invites, 52, CARD_ALT)
+        y += _invites_h(invites) + 12
 
     # 比赛流程（BP）
     if stats.vetos:
@@ -814,16 +964,23 @@ async def render_reminder(
     maps: str = "",
     is_grand_final: bool = False,
     is_third_place: bool = False,
+    stats: Optional[MatchStats] = None,
 ) -> bytes:
-    """渲染比赛开始提醒图片"""
+    """渲染比赛开始提醒图片；stats 是 match 页数据，带赛段与 VRS，抓不到时为 None"""
     width = 550
     inner = _inner_width(width)
+    stage = stats.stage if stats else ""
+    stage_h = 26 if stage else 0
+    has_forecast = _has_forecast(stats)
+    invites = _live_invites(stats)
 
     h = PAD + HEADER_H + 14
     h += 96  # countdown
-    h += 72  # event banner
+    h += 72 + stage_h  # event banner
     h += 108  # versus
+    h += FORECAST_CARD_H + 16 if has_forecast else 0
     h += 60 if maps else 10
+    h += _invites_h(invites) + 16 if invites else 0
     h += 46 + PAD
 
     img = _canvas(width, h)
@@ -839,14 +996,16 @@ async def render_reminder(
     _draw_text(draw, (width // 2, y + 62), "当前状态 Status", _font(12), fill=TEXT_DARK, anchor="ma")
     y += 96
 
-    # event 横幅
-    _rounded_card(draw, (x, y, x + inner, y + 56), fill=(36, 28, 18), radius=6)
+    # event 横幅；赛段是 HLTV 编辑手写的整句，过长截断
+    _rounded_card(draw, (x, y, x + inner, y + 56 + stage_h), fill=(36, 28, 18), radius=6)
     _draw_text(draw, (width // 2, y + 18), f"◆ {event_title}", _font(15, bold=True), fill=ORANGE, anchor="ma")
+    if stage:
+        _draw_text(draw, (width // 2, y + 38), _truncate(draw, stage, _font(12), inner - 24), _font(12), fill=TEXT, anchor="ma")
     if is_grand_final:
-        _badge(draw, (width // 2, y + 40), "GRAND FINAL", _font(11, bold=True), GOLD, (43, 26, 0))
+        _badge(draw, (width // 2, y + 40 + stage_h), "GRAND FINAL", _font(11, bold=True), GOLD, (43, 26, 0))
     elif is_third_place:
-        _badge(draw, (width // 2, y + 40), "3RD PLACE", _font(11, bold=True), BRONZE, (43, 20, 0))
-    y += 72
+        _badge(draw, (width // 2, y + 40 + stage_h), "3RD PLACE", _font(11, bold=True), BRONZE, (43, 20, 0))
+    y += 72 + stage_h
 
     # 队伍 VS
     _rounded_card(draw, (x, y, x + inner, y + 92), fill=PANEL, radius=10)
@@ -860,10 +1019,19 @@ async def render_reminder(
     _draw_text(draw, (width // 2, cy), "VS", _font(20, bold=True), fill=ORANGE, anchor="mm")
     y += 108
 
+    if has_forecast:
+        centers = (x + 10 + team_w // 2, x + inner - 10 - team_w // 2)
+        _draw_forecast(draw, x, y, inner, stats, centers, PANEL)
+        y += FORECAST_CARD_H + 16
+
     if maps:
         _rounded_card(draw, (x, y, x + inner, y + 44), fill=PANEL, radius=8)
         _draw_text(draw, (width // 2, y + 22), f"◆ 比赛格式  BO{maps}", _font(14, bold=True), fill=WHITE, anchor="mm")
         y += 60
+
+    if invites:
+        _draw_invites(draw, x, y, inner, invites, 42, PANEL)
+        y += _invites_h(invites) + 16
 
     _footer(draw, x, y, width, f"HLTV SUB PLUGIN • {get_timestamp()}")
     return _to_png(img)

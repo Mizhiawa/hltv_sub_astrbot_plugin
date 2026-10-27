@@ -10,14 +10,116 @@ from typing import Dict, List, Optional
 from bs4 import BeautifulSoup, Tag
 
 from ..log_utils import get_logger
-from ..models import MapStats, MatchStats, PlayerStats
+from ..models import (
+    InviteChance,
+    MapStats,
+    MatchStats,
+    PlayerStats,
+    VrsChange,
+    VrsForecast,
+    VrsInvite,
+)
 
 logger = get_logger("hltv_sub.parsers.stats")
+
+_INVITE_CHANCE = re.compile(r"[<>]?\d+(?:\.\d+)?%")
 
 
 def _extract_id_from_url(url: str) -> str:
     m = re.search(r"/(\d+)/", url or "")
     return m.group(1) if m else ""
+
+
+def _text_of(elem) -> str:
+    return elem.get_text(strip=True) if elem else ""
+
+
+def _vrs_container(soup: BeautifulSoup, header: str) -> Optional[Tag]:
+    """同一个容器赛后是 result（before / result），赛前赛中是 forecast（current / if wins / if loses），按中栏 header 区分"""
+    container = soup.select_one(".vrs-forecast-container")
+    middle = container.select_one(".vrs-forecast-middle .vrs-forecast-header") if container else None
+    if middle is None or header not in middle.get_text(" ", strip=True).lower():
+        return None
+    return container
+
+
+def _vrs_column(container: Tag, selector: str) -> list[tuple[int, int] | None]:
+    """一栏两行依次是 team1、team2，每行 (积分, 排名)；未上榜的行只有 Unranked 或 –、没有排名元素，记 None"""
+    rows: list[tuple[int, int] | None] = []
+    for wrapper in container.select(f"{selector} .vrs-forecast-numbers-wrapper"):
+        points = re.search(r"[+-]?\d+", _text_of(wrapper.select_one(".vrs-forecast-points")))
+        rank = re.search(r"\d+", _text_of(wrapper.select_one(".vrs-forecast-ranking")))
+        rows.append((int(points.group()), int(rank.group())) if points and rank else None)
+    return rows
+
+
+def _parse_vrs_result(soup: BeautifulSoup) -> tuple[Optional[VrsChange], Optional[VrsChange]]:
+    container = _vrs_container(soup, "result")
+    if container is None:
+        return None, None
+    before = _vrs_column(container, ".vrs-forecast-left-numbers")
+    after = _vrs_column(container, ".vrs-forecast-middle")
+    # 结算条按两队都有来排版，任一队未上榜整块不显示
+    if len(before) != 2 or len(after) != 2 or None in before + after:
+        return None, None
+    team1, team2 = (
+        VrsChange(points_before=b[0], rank_before=b[1], points_delta=a[0], rank_after=a[1])
+        for b, a in zip(before, after)
+    )
+    return team1, team2
+
+
+def _parse_vrs_forecast(soup: BeautifulSoup) -> tuple[Optional[VrsForecast], Optional[VrsForecast]]:
+    container = _vrs_container(soup, "team wins")
+    if container is None:
+        return None, None
+    columns = [
+        _vrs_column(container, selector)
+        for selector in (".vrs-forecast-left-numbers", ".vrs-forecast-middle", ".vrs-forecast-right")
+    ]
+    if any(len(column) != 2 for column in columns):
+        return None, None
+    team1, team2 = (
+        VrsForecast(
+            points=current[0], rank=current[1],
+            win_delta=win[0], win_rank=win[1], lose_delta=lose[0], lose_rank=lose[1],
+        ) if current and win and lose else None
+        for current, win, lose in zip(*columns)
+    )
+    return team1, team2
+
+
+def _invite_chance(row: Tag) -> Optional[InviteChance]:
+    """三格依次是 now / win / lose；本场胜负不影响时只有 now 和 “Either way 9.1%” 两格"""
+    cells = row.select(".vrs-invite-stakes-chance")
+    values = [_INVITE_CHANCE.search(cell.get_text(" ", strip=True)) for cell in cells]
+    if None in values:
+        return None
+    values = [value.group() for value in values]
+    if len(cells) == 3:
+        return InviteChance(*values)
+    if len(cells) == 2 and "either-way" in cells[1].get("class", []):
+        return InviteChance(now=values[0], win=values[1], lose=values[1])
+    return None
+
+
+def _parse_vrs_invites(soup: BeautifulSoup) -> list[VrsInvite]:
+    """赛前、赛中且有邀请悬念时才有，含折叠在 “N more invites” 里的；每项两行依次是 team1、team2
+
+    结构对不上的项跳过：这一块是附带信息，不该连累提醒和单图推送。
+    """
+    invites: list[VrsInvite] = []
+    for block in soup.select(".vrs-invite-stakes-invite"):
+        title = block.select_one(".vrs-invite-stakes-title")
+        chances = [
+            _invite_chance(row)
+            for row in block.select(".vrs-invite-stakes-row:not(.vrs-invite-stakes-labels)")
+        ]
+        if title is None or len(chances) != 2 or None in chances:
+            logger.warning(f"[HLTV] 跳过结构不明的 VRS 邀请: {_text_of(title)!r}")
+            continue
+        invites.append(VrsInvite(event=_text_of(title), team1=chances[0], team2=chances[1]))
+    return invites
 
 
 def _parse_player_table(table: Tag, team_idx: int) -> List[PlayerStats]:
@@ -196,11 +298,14 @@ def parse_match_stats(
         if countdown:
             status = countdown.get_text(strip=True)
 
-        # 解析 Veto/BP
+        # 解析 Veto/BP；赛制框（preformatted-text）里 * 开头的第一行是赛段
         vetos: list[str] = []
+        stage = ""
         veto_boxes = soup.find_all("div", class_="veto-box")
         for box in veto_boxes:
             lines = [line.strip() for line in box.get_text("\n").split("\n") if line.strip()]
+            if not stage and box.find(class_="preformatted-text"):
+                stage = next((l.lstrip("* ").strip() for l in lines if l.startswith("*")), "")
             filtered_lines = [l for l in lines if not l.startswith("*")]
             if filtered_lines:
                 vetos.extend(filtered_lines)
@@ -314,6 +419,9 @@ def parse_match_stats(
                 if map_players:
                     map_stats_details[map_info.map_name] = map_players
 
+        team1_vrs, team2_vrs = _parse_vrs_result(soup)
+        team1_vrs_forecast, team2_vrs_forecast = _parse_vrs_forecast(soup)
+
         return MatchStats(
             match_id=match_id,
             team1=team1,
@@ -326,6 +434,12 @@ def parse_match_stats(
             map_stats_details=map_stats_details,
             vetos=vetos,
             event=event_title,
+            stage=stage,
+            team1_vrs=team1_vrs,
+            team2_vrs=team2_vrs,
+            team1_vrs_forecast=team1_vrs_forecast,
+            team2_vrs_forecast=team2_vrs_forecast,
+            vrs_invites=_parse_vrs_invites(soup),
         )
 
     except Exception as e:

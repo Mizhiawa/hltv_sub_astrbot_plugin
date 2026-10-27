@@ -575,6 +575,17 @@ class HLTVScheduler:
         if not groups:
             return
 
+        # 赛段、VRS 只在 match 页上；抓不到就照常出图，只是不带这几块。开赛后查单图结果会命中同一份缓存
+        stats = await self._fetch_with_retry(
+            lambda: hltv_data.get_match_stats(
+                match_id=match.match_id,
+                team1=match.team1,
+                team2=match.team2,
+                event_title=match.event_title,
+            ),
+            event_id=match.event_id,
+        )
+
         text = ""
         image_path = ""
         try:
@@ -588,6 +599,7 @@ class HLTVScheduler:
                 maps=match.maps,
                 is_grand_final=match.is_grand_final,
                 is_third_place=match.is_third_place,
+                stats=stats,
             )
             image_path = image_segment(img)
         except Exception as e:
