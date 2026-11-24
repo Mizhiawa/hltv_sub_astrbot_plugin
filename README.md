@@ -1,5 +1,5 @@
 # hltv_sub_astrbot_plugin
-
+ version_2
 移植自 [HakuchumuHYX/HakuBot](https://github.com/HakuchumuHYX/HakuBot) 中 `hltv_sub` 的 **HLTV (CS2) 大型赛事订阅与实时战报插件**，针对 **AstrBot 4.29.4 + SnowLuma 2.4.2 (OneBot v11)** 及 **Linux Ubuntu Docker** 部署环境重构与深度适配。
 
 ---
