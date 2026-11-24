@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+
+{% block title %}HLTV Results{% endblock %}
+
+{% block extra_styles %}
+.fixture {
+    display: grid;
+    grid-template-columns: 60px 1fr 104px 1fr 96px;
+    align-items: center;
+    min-height: 62px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+.fixture:last-child {
+    border-bottom: none;
+}
+
+.day {
+    font-size: 17px;
+    color: var(--muted);
+}
+
+.side {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.side.t1 {
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.side-name {
+    font-size: 22px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.side.lost .side-name {
+    color: var(--muted);
+}
+
+.side.lost .logo-slot {
+    opacity: 0.45;
+}
+
+.score {
+    text-align: center;
+    font-size: 30px;
+    font-weight: 700;
+}
+
+.score .sep {
+    margin: 0 6px;
+    color: var(--line);
+}
+
+.trail {
+    color: var(--muted);
+}
+
+.meta {
+    text-align: right;
+    line-height: 1.25;
+}
+
+.meta .bo {
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.meta .id {
+    font-size: 15px;
+    color: var(--muted);
+}
+{% endblock %}
+
+{% block content %}
+{# bo1 时 HLTV 给的是地图缩写 #}
+{% set map_names = {'d2': 'Dust2', 'mrg': 'Mirage', 'inf': 'Inferno', 'nuke': 'Nuke', 'anc': 'Ancient', 'ovp': 'Overpass', 'vtg': 'Vertigo', 'anb': 'Anubis', 'trn': 'Train', 'cch': 'Cache', 'cbl': 'Cobblestone'} %}
+
+<div class="page-head">
+    <div class="page-title">赛果</div>
+    <div class="page-note">已订阅赛事的最近结果</div>
+</div>
+
+{% for event_name, results in results_by_event.items() %}
+{% set event_id, _, event_title = event_name.partition(' ') %}
+<div class="group">
+    <div class="group-title"><span class="num">{{ event_id }}</span><span>{{ event_title }}</span></div>
+    {% for result in results %}
+    {% set score1 = result.score1|int %}
+    {% set score2 = result.score2|int %}
+    {% set fmt = result.format|lower %}
+    <div class="fixture">
+        <div class="day num">{{ result.date }}</div>
+        <div class="side t1 {% if score1 < score2 %}lost{% endif %}">
+            <span class="side-name num">{{ result.team1 }}</span>
+            {{ m.logo(result.team1_logo, 32) }}
+        </div>
+        <div class="score num">
+            <span class="{% if score1 < score2 %}trail{% endif %}">{{ result.score1 }}</span><span class="sep">:</span><span class="{% if score2 < score1 %}trail{% endif %}">{{ result.score2 }}</span>
+        </div>
+        <div class="side t2 {% if score2 < score1 %}lost{% endif %}">
+            {{ m.logo(result.team2_logo, 32) }}
+            <span class="side-name num">{{ result.team2 }}</span>
+        </div>
+        <div class="meta">
+            {% if fmt.startswith('bo') %}
+            <div class="bo num">{{ fmt|upper }}</div>
+            {% elif fmt %}
+            <div class="bo num">{{ map_names.get(fmt, result.format) }}</div>
+            {% endif %}
+            <div class="id num">#{{ result.id }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+
+{% if not results_by_event %}
+<div class="empty">暂无比赛结果，订阅赛事后再查看</div>
+{% endif %}
+
+<div class="tip">发送 <code>stats 比赛ID</code> 查看单场详细数据</div>
+{% endblock %}

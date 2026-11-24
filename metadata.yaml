@@ -1,10 +1,14 @@
 name: hltv_sub
 display_name: HLTV订阅
-desc: HLTV CS2 赛事订阅和比赛信息查询。支持赛事订阅、比赛/结果/数据查询、开赛提醒与结果推送。
-short_desc: HLTV CS2 赛事订阅与推送
-author: Hakuchumu
-version: 1.0.0
+desc: |
+  移植自 HakuchumuHYX/HakuBot 的 HLTV (CS2) 大型赛事订阅与实时战报插件，面向 AstrBot 4.29.4 + SnowLuma 2.4.2 (OneBot v11) 及 Linux Ubuntu Docker 部署深度适配。
+  支持自动发现并订阅 Big Events、开赛提醒、非 BO1 逐图战报（可开关）、全场终局战报、VRS 排名积分预测/结算、总决赛 MVP 自动播报，以及赛事/赛程/赛果/单场详细数据查询。
+short_desc: HLTV CS2 大型赛事订阅、开赛提醒、单图/全场战报、VRS 与 MVP 自动播报
+version: 2.0.0
+author: Hakuchumu & Mizhiawa
 repo: https://github.com/Mizhiawa/hltv_sub_astrbot_plugin
+astrbot_version: ">=4.29.0,<5"
 support_platforms:
   - aiocqhttp
-astrbot_version: ">=4.5.0"
+supported_platforms:
+  - aiocqhttp

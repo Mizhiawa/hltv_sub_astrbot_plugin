@@ -1,17 +1,18 @@
-# ===== 系统 / 工具缓存（不上传） =====
-.reasonix/
+# Python / Bytecode
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
 
-# ===== 虚拟环境 / IDE =====
+# Virtual environments / IDEs
 .venv/
 venv/
 env/
 .idea/
 .vscode/
 
-# ===== 运行期数据（插件数据默认在 AstrBot data/ 下，不在插件目录） =====
-# 若你把数据放进了仓库，请删掉下面这几行再上传
+# Runtime logs / backups
 *.log
 *.bak
+.DS_Store
+Thumbs.db

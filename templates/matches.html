@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+
+{% block title %}HLTV Matches{% endblock %}
+
+{% block extra_styles %}
+.fixture {
+    position: relative;
+    display: grid;
+    grid-template-columns: 68px 1fr 44px 1fr 96px;
+    align-items: center;
+    min-height: 64px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+.fixture:last-child {
+    border-bottom: none;
+}
+
+/* 左侧色条只标两件事：正在直播、决赛/季军赛 */
+.fixture::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 2px;
+}
+
+.fixture.live::before {
+    background: var(--live);
+}
+
+.fixture.grand-final {
+    background: rgba(232, 196, 104, 0.07);
+}
+
+.fixture.grand-final::before {
+    background: var(--gold);
+}
+
+.fixture.third-place {
+    background: rgba(197, 139, 90, 0.07);
+}
+
+.fixture.third-place::before {
+    background: var(--bronze);
+}
+
+.when .num {
+    display: block;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.when .day {
+    font-size: 14px;
+    color: var(--muted);
+}
+
+.when .live-text {
+    color: var(--live);
+    font-weight: 700;
+}
+
+.side {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.side.t1 {
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.side-name {
+    font-size: 22px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.side-name.placeholder {
+    font-family: var(--cjk);
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--muted);
+    white-space: normal;
+}
+
+.vs {
+    text-align: center;
+    font-size: 16px;
+    color: var(--muted);
+}
+
+.meta {
+    text-align: right;
+    line-height: 1.25;
+}
+
+.meta .stage {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.grand-final .stage {
+    color: var(--gold);
+}
+
+.third-place .stage {
+    color: var(--bronze);
+}
+
+.meta .bo {
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.meta .stars {
+    margin-left: 4px;
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 1px;
+}
+
+.meta .id {
+    font-size: 15px;
+    color: var(--muted);
+}
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-title">赛程</div>
+    <div class="page-note">
+        {% if live_count %}<span style="color: var(--live);">{{ live_count }} 场直播中</span>&emsp;{% endif %}{{ upcoming_count }} 场待开始
+    </div>
+</div>
+
+{% for event_name, matches in matches_by_event.items() %}
+{% set event_id, _, event_title = event_name.partition(' ') %}
+<div class="group">
+    <div class="group-title"><span class="num">{{ event_id }}</span><span>{{ event_title }}</span></div>
+    {% for match in matches %}
+    <div class="fixture {% if match.is_live %}live{% endif %} {% if match.is_grand_final %}grand-final{% elif match.is_third_place %}third-place{% endif %}">
+        <div class="when">
+            {% if match.is_live %}
+            <span class="num live-text">LIVE</span>
+            {% else %}
+            <span class="num">{{ match.time or '待定' }}</span>
+            <span class="num day">{{ match.date }}</span>
+            {% endif %}
+        </div>
+        <div class="side t1">
+            <span class="side-name num {% if not match.team1_id %}placeholder{% endif %}">{{ match.team1 }}</span>
+            {{ m.logo(match.team1_logo, 32) }}
+        </div>
+        <div class="vs">vs</div>
+        <div class="side t2">
+            {{ m.logo(match.team2_logo, 32) }}
+            <span class="side-name num {% if not match.team2_id %}placeholder{% endif %}">{{ match.team2 }}</span>
+        </div>
+        <div class="meta">
+            {% if match.is_grand_final %}
+            <div class="stage">决赛</div>
+            {% elif match.is_third_place %}
+            <div class="stage">季军赛</div>
+            {% endif %}
+            {% if match.maps %}<div><span class="bo num">BO{{ match.maps }}</span>{% if match.rating %}<span class="stars">{{ '★' * match.rating }}</span>{% endif %}</div>{% endif %}
+            <div class="id num">#{{ match.id }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+
+{% if not matches_by_event %}
+<div class="empty">暂无比赛，订阅赛事或等待对阵公布后再查看</div>
+{% endif %}
+{% endblock %}

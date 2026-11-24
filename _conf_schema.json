@@ -1,104 +1,115 @@
 {
-  "hltv_min_delay": {
-    "type": "float",
-    "default": 5.0,
-    "name": "最小延迟（秒，已废弃）",
-    "description": "已废弃：请改用「请求最小间隔」。保留该项仅为兼容旧配置。"
-  },
-  "hltv_timeout": {
-    "type": "int",
-    "default": 15,
-    "name": "超时时间（秒）",
-    "description": "HLTV 请求超时时间（秒）。"
-  },
-  "hltv_request_interval_seconds": {
-    "type": "float",
-    "default": 15.0,
-    "name": "请求最小间隔（秒）",
-    "description": "任意两次访问 HLTV 之间的最小间隔。调大可显著降低被 Cloudflare 拦截的概率，代价是查询变慢（建议 15~30）。"
-  },
-  "hltv_block_cooldown_seconds": {
-    "type": "int",
-    "default": 600,
-    "name": "被拦截后首次冷却（秒）",
-    "description": "被 Cloudflare 拦截后暂停访问的时长；连续被拦会按倍数递增。"
-  },
-  "hltv_block_cooldown_max_seconds": {
-    "type": "int",
-    "default": 7200,
-    "name": "冷却上限（秒）",
-    "description": "连续被拦截时冷却时间的上限。"
-  },
-  "hltv_flaresolverr_timeout_seconds": {
-    "type": "int",
-    "default": 60,
-    "name": "FlareSolverr 超时（秒）",
-    "description": "单次浏览器求解的超时时间；求解需要执行 JS 挑战，通常要 20~60 秒。"
-  },
-  "hltv_timezone": {
+  "flaresolverr_url": {
     "type": "string",
-    "default": "Asia/Shanghai",
-    "name": "时区",
-    "description": "比赛时间显示的时区，如 Asia/Shanghai。"
+    "description": "FlareSolverr 接口地址",
+    "hint": "Ubuntu Docker 部署下切勿填 127.0.0.1：同 compose 网络请填 http://flaresolverr:8191/v1，宿主机端口映射请填 http://172.17.0.1:8191/v1",
+    "default": "http://flaresolverr:8191/v1"
   },
-  "hltv_auto_unsub_delay_days": {
+  "flaresolverr_timeout_seconds": {
     "type": "int",
-    "default": 2,
-    "name": "自动退订延迟天数",
-    "description": "赛事结束后延迟多少天自动取消订阅。"
+    "description": "FlareSolverr 单次页面超时时间（秒）",
+    "default": 60
   },
-  "hltv_notified_ttl_days": {
-    "type": "int",
-    "default": 30,
-    "name": "推送去重状态保留天数",
-    "description": "推送去重状态（已提醒/已推送的比赛 ID）保留天数。"
-  },
-  "hltv_scheduler_max_parallel": {
-    "type": "int",
-    "default": 3,
-    "name": "多赛事轮询并发上限",
-    "description": "多赛事轮询并发上限（防止请求风暴）。"
-  },
-  "hltv_scheduler_jitter_seconds": {
-    "type": "int",
-    "default": 8,
-    "name": "每赛事 job 触发抖动（秒）",
-    "description": "每个赛事轮询 job 触发时的随机抖动，避免同刻并发。"
-  },
-  "hltv_watermark_text": {
-    "type": "string",
-    "default": "Designed by Hakuchumu\nModified by M1z",
-    "name": "水印文本",
-    "description": "图片水印文本，支持换行（\\n）。"
-  },
-  "hltv_proxy_list": {
-    "type": "list",
-    "default": [],
-    "name": "代理列表",
-    "description": "可选代理列表，如 [\"http://127.0.0.1:7890\"]。"
-  },
-  "hltv_impersonate": {
-    "type": "string",
-    "default": "chrome124",
-    "name": "浏览器指纹模拟",
-    "description": "curl_cffi impersonate 参数。UA、Sec-Ch-Ua 等请求头由该指纹统一生成以保证与 TLS 指纹自洽；填了当前 curl_cffi 不支持的档位会自动回退到可用指纹（日志有提示），因此可以放心尝试更新的版本（如 chrome131）。"
-  },
-  "hltv_flaresolverr_url": {
-    "type": "string",
-    "default": "",
-    "name": "FlareSolverr 地址",
-    "description": "强烈建议配置。HLTV 的动态页面（比赛列表）会触发 Cloudflare 挑战，配置后可由 FlareSolverr 自动求解并通过 cf_clearance 复用，例如 http://127.0.0.1:8191/v1；需与插件运行在同一出口 IP 上。"
-  },
-  "hltv_superusers": {
-    "type": "list",
-    "default": [],
-    "name": "插件超级用户",
-    "description": "插件级超级用户 ID 列表（调试命令 hltv_check/hltv_trigger 使用）。留空时回退到 AstrBot 的 admins_id。"
-  },
-  "hltv_enable_map_result_push": {
+  "enable_map_result_push": {
     "type": "bool",
-    "default": true,
-    "name": "播报单图结果",
-    "description": "关闭后，非 BO1 比赛每打完一张地图不再逐图播报，仅在比赛开始与整场结束时播报。"
+    "description": "非 BO1 比赛逐图播报开关",
+    "hint": "关闭后每打完一张地图不再播报，仅保留开赛提醒与整场结果推送（以及总决赛赛后 MVP 播报）",
+    "default": true
+  },
+  "request_interval_seconds": {
+    "type": "float",
+    "description": "串行请求最小间隔（秒）",
+    "hint": "请求本身由锁串行执行，0 表示上一个返回后立即发下一个；若频繁触发冷却可调为 1~3 秒",
+    "default": 0.0
+  },
+  "session_max_requests": {
+    "type": "int",
+    "description": "单个 FlareSolverr 浏览器会话最大请求次数",
+    "hint": "达到次数后自动轮换浏览器会话，防止 FlareSolverr 内 Chromium 内存持续增长",
+    "default": 30
+  },
+  "block_cooldown_seconds": {
+    "type": "int",
+    "description": "被拦截或连接失败后的初始冷却时间（秒）",
+    "default": 600
+  },
+  "block_cooldown_max_seconds": {
+    "type": "int",
+    "description": "指数退避最大冷却时间（秒）",
+    "default": 7200
+  },
+  "timezone": {
+    "type": "string",
+    "description": "赛事日期与比赛时间展示时区",
+    "default": "Asia/Shanghai"
+  },
+  "auto_unsub_delay_days": {
+    "type": "int",
+    "description": "赛事结束后延迟自动取消订阅天数",
+    "default": 2
+  },
+  "auto_sub_interval_days": {
+    "type": "int",
+    "description": "自动扫描并订阅 HLTV Big Events 的间隔天数",
+    "default": 7
+  },
+  "notified_ttl_days": {
+    "type": "int",
+    "description": "已推送记录（去重状态）保留天数",
+    "default": 30
+  },
+  "scheduler_jitter_seconds": {
+    "type": "int",
+    "description": "各赛事下次检查时间的随机偏移上限（秒）",
+    "default": 8
+  },
+  "render_backend": {
+    "type": "string",
+    "description": "图片渲染后端模式",
+    "hint": "auto：优先使用容器内本地 Playwright Chromium（2x 高清还原），若容器未安装浏览器则自动回退到 AstrBot 内置 html_render (T2I) 服务",
+    "options": [
+      "auto",
+      "playwright",
+      "astrbot_t2i"
+    ],
+    "default": "auto"
+  },
+  "allow_no_prefix": {
+    "type": "bool",
+    "description": "允许群内免唤醒词直接触发指令",
+    "hint": "开启后，群内直接输入 event列表 / matches / stats 等（不带 / 前缀）也可触发，与原版 HakuBot 习惯一致",
+    "default": true
+  },
+  "allow_group_admin": {
+    "type": "bool",
+    "description": "允许 QQ 群主与群管理员管理本群开关及赛事订阅",
+    "hint": "开启后，SnowLuma/OneBot 群主与管理员也可使用 hltv开启/关闭、event订阅/取消订阅；关闭则仅限 AstrBot 全局管理员",
+    "default": true
+  },
+  "default_enabled_groups": {
+    "type": "list",
+    "description": "默认启用 HLTV 推送的 QQ 群号列表（可选）",
+    "hint": "也可直接在群聊中发送 hltv开启 动态启用；在此处填写的群号将自动通过 SnowLuma (aiocqhttp) 实例投递推送",
+    "default": [],
+    "items": {
+      "type": "string"
+    }
+  },
+  "watermark_text": {
+    "type": "string",
+    "description": "渲染卡片左下角水印文本（支持用 \\n 换行）",
+    "default": "Designed by Hakuchumu\nModified by Mizhiawa"
+  },
+  "custom_font_dir": {
+    "type": "string",
+    "description": "自定义 MiSans 字体目录（可选）",
+    "hint": "留空则自动查找 /AstrBot/data/plugin_data/hltv_sub/fonts 及 Ubuntu 容器内 /usr/share/fonts 中文字体",
+    "default": ""
+  },
+  "playwright_browsers_path": {
+    "type": "string",
+    "description": "自定义 Playwright 浏览器路径（可选）",
+    "hint": "若将浏览器持久化在数据卷（如 /AstrBot/data/plugin_data/hltv_sub/playwright），可在此填写，留空自动探测",
+    "default": ""
   }
 }

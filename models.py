@@ -1,16 +1,36 @@
-"""
-HLTV 数据模型（dataclasses）
-"""
+"""HLTV 数据模型（dataclasses）。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from datetime import datetime
+
+
+@dataclass
+class MvpStat:
+    """value 是相对赛事平均水平的倍数，1.0 即平均；label 是页面展示值。"""
+
+    name: str
+    label: str
+    value: float
+
+
+@dataclass
+class EventMvp:
+    nickname: str
+    first_name: str
+    last_name: str
+    country: str
+    country_name: str
+    photo: str
+    medal: str
+    stats: list[MvpStat] = field(default_factory=list)
 
 
 @dataclass
 class EventInfo:
-    """赛事信息"""
+    """赛事日期使用 YYYY-MM-DD，展示时再格式化。"""
+
     id: str
     title: str
     start_date: str
@@ -18,19 +38,24 @@ class EventInfo:
     prize: str = ""
     teams: str = ""
     location: str = ""
+    country: str = ""  # 举办地旗帜代码，只有即将举行的大型赛事有
+    logo: str = ""  # 只有正在进行的赛事卡片带 logo
     is_ongoing: bool = False
+    mvp: EventMvp | None = None  # 只有详情页在赛后评出 MVP 时有
 
 
 @dataclass
 class MatchInfo:
-    """比赛信息（用于渲染/提醒：保持过滤 TBD 的语义）"""
+    """比赛信息（用于渲染/提醒：保持过滤 TBD 的语义）。"""
+
     id: str
-    date: str
-    time: str
+    start_time: datetime | None
     team1: str
     team2: str
     team1_id: str
     team2_id: str
+    team1_logo: str = ""
+    team2_logo: str = ""
     maps: str = ""
     rating: int = 0
     event: str = ""
@@ -41,44 +66,56 @@ class MatchInfo:
 
 @dataclass
 class MatchTimeHint:
-    """比赛时间提示（用于 scheduler 自适应轮询；不依赖队伍是否已确定）
+    """比赛时间提示（用于 scheduler 自适应轮询；不依赖队伍是否已确定）。"""
 
-    说明：
-    - 不过滤 TBD
-    - 只提供 scheduler 需要的“时间/是否 LIVE/是否 TBD”等信息
-    """
     match_id: str
-    date: str
-    time: str
+    start_time: datetime | None
     is_live: bool
     is_tbd: bool = False
 
 
 @dataclass
 class ResultInfo:
-    """结果信息"""
+    """结果信息；date 为 YYYY-MM-DD，format 为 bo3/bo5 或 bo1 的地图名。"""
+
     id: str
     date: str
     team1: str
     team2: str
     score1: str
     score2: str
+    team1_logo: str = ""
+    team2_logo: str = ""
+    format: str = ""
     event: str = ""
 
 
 @dataclass
+class HalfScore:
+    """半场比分；team1_side 为 team1 在该半场的阵营（ct / t），加时可能为空。"""
+
+    score1: str
+    score2: str
+    team1_side: str = ""
+
+
+@dataclass
 class MapStats:
-    """地图数据"""
+    """地图数据。"""
+
     map_name: str
-    pick_by: str  # team1, team2, or decider
+    pick_by: str  # team1 / team2；空串表示 decider
     score_team1: str
     score_team2: str
     stats_id: str = ""  # 用于关联单图详细数据
+    halves: list[HalfScore] = field(default_factory=list)
+    image: str = ""  # HLTV 的地图横幅
 
 
 @dataclass
 class PlayerStats:
-    """选手数据"""
+    """选手数据。"""
+
     id: str
     nickname: str
     team: str  # team1 or team2
@@ -88,11 +125,55 @@ class PlayerStats:
     kast: str
     rating: str
     swing: str = ""
+    country: str = ""  # HLTV 旗帜代码，如 SE、EU、WORLD
+    country_name: str = ""
+
+
+@dataclass
+class VrsChange:
+    """赛后 VRS result：HLTV 只按本场胜负估算，正式 VRS 还会计入名次、奖金等。"""
+
+    points_before: int
+    rank_before: int
+    points_delta: int
+    rank_after: int
+
+
+@dataclass
+class VrsForecast:
+    """赛前/赛中的 VRS forecast：HLTV 按本场胜负估算。"""
+
+    points: int
+    rank: int
+    win_delta: int
+    win_rank: int
+    lose_delta: int
+    lose_rank: int
+
+
+@dataclass
+class InviteChance:
+    """一队拿到某个邀请的模拟概率，均为页面原文；胜负不影响时 win 和 lose 同值。"""
+
+    now: str
+    win: str
+    lose: str
+
+
+@dataclass
+class VrsInvite:
+    """match 页 VRS invite stakes 的一项。"""
+
+    event: str
+    logo: str
+    team1: InviteChance
+    team2: InviteChance
 
 
 @dataclass
 class MatchStats:
-    """比赛详细数据"""
+    """比赛详细数据。"""
+
     match_id: str
     team1: str
     team2: str
@@ -101,6 +182,48 @@ class MatchStats:
     status: str
     maps: list[MapStats]
     players: list[PlayerStats]  # 总数据
-    map_stats_details: Dict[str, List[PlayerStats]] = field(default_factory=dict)  # 单图详细数据 {map_name: players}
+    map_stats_details: dict[str, list[PlayerStats]] = field(
+        default_factory=dict
+    )  # 单图详细数据 {map_name: players}
     vetos: list[str] = field(default_factory=list)
     event: str = ""
+    team1_logo: str = ""
+    team2_logo: str = ""
+    team1_country: str = ""
+    team1_country_name: str = ""
+    team2_country: str = ""
+    team2_country_name: str = ""
+    format_line: str = ""  # 如 "Best of 3 (LAN)"
+    stage: str = ""  # 如 "Semi-final"
+    is_grand_final: bool = False
+    is_third_place: bool = False
+    date: str = ""  # YYYY-MM-DD
+    team1_vrs: VrsChange | None = None  # 仅比赛结束后有
+    team2_vrs: VrsChange | None = None
+    team1_vrs_forecast: VrsForecast | None = None  # 赛前/赛中有；未上榜的队为 None
+    team2_vrs_forecast: VrsForecast | None = None
+    vrs_invites: list[VrsInvite] = field(default_factory=list)
+
+
+@dataclass
+class EventMatchesMeta:
+    final_url: str = ""
+    is_unavailable: bool = False
+    unavailable_reason: str = ""
+
+
+@dataclass
+class EventMatchesPage:
+    matches: list[MatchInfo]
+    hints: list[MatchTimeHint]
+    meta: EventMatchesMeta
+
+
+@dataclass
+class EventCheckResult:
+    """一轮检查里调度要用的信息。"""
+
+    next_minutes_hint: int | None = None  # 距最近一场开赛的分钟数，0 表示已到点
+    live_seen_at: datetime | None = None  # 本轮看到直播的时刻
+    has_error: bool = False
+    retry_at: float = 0  # 冷却结束的时间戳

@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+
+{% block title %}HLTV Events{% endblock %}
+
+{% block extra_styles %}
+.event {
+    display: grid;
+    grid-template-columns: 44px 1fr auto;
+    align-items: center;
+    gap: 14px;
+    min-height: 66px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+.event:last-child {
+    border-bottom: none;
+}
+
+.event .flag {
+    width: 30px;
+    height: 20px;
+}
+
+.event-visual {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.event-name {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.event-sub {
+    display: flex;
+    gap: 14px;
+    margin-top: 2px;
+    font-size: 15px;
+    color: var(--muted);
+}
+
+.event-sub .num {
+    font-size: 17px;
+}
+
+.event-id {
+    text-align: right;
+    font-size: 24px;
+    font-weight: 600;
+}
+{% endblock %}
+
+{% macro event_row(event) %}
+<div class="event">
+    <div class="event-visual">
+        {% if event.logo %}
+        {{ m.logo(event.logo, 40) }}
+        {% else %}
+        {{ m.flag(event.country, event.location) }}
+        {% endif %}
+    </div>
+    <div>
+        <div class="event-name">{{ event.title }}</div>
+        <div class="event-sub">
+            {% if event.start_date %}<span class="num">{{ event.start_date }} – {{ event.end_date }}</span>{% endif %}
+            {% if event.location %}<span>{{ event.location }}</span>{% endif %}
+        </div>
+    </div>
+    <div class="event-id num">#{{ event.id }}</div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-title">赛事</div>
+    <div class="page-note">HLTV 近期大型赛事</div>
+</div>
+
+{% if ongoing_events %}
+<div class="group">
+    <div class="group-title">正在进行</div>
+    {% for event in ongoing_events %}{{ event_row(event) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if upcoming_events %}
+<div class="group">
+    <div class="group-title">即将举行</div>
+    {% for event in upcoming_events %}{{ event_row(event) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if not ongoing_events and not upcoming_events %}
+<div class="empty">暂无大型赛事</div>
+{% endif %}
+
+<div class="tip">发送 <code>event订阅 ID</code> 订阅赛事，<code>event取消订阅 ID</code> 取消订阅</div>
+{% endblock %}

@@ -1,98 +1,67 @@
-"""
-HLTV results 页面解析
-"""
+"""HLTV results 页面解析。"""
 
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from bs4 import BeautifulSoup
-
-from ..log_utils import get_logger
+from ..log_compat import logger
 from ..models import ResultInfo
+from .common import (
+    extract_id_from_url,
+    format_date,
+    make_soup,
+    pick_logo,
+    text_of,
+)
 
-logger = get_logger("hltv_sub.parsers.results")
 
-
-def parse_event_results(html: str, max_results: int = 20) -> list[ResultInfo]:
-    """解析 /results?event=xxx 页面"""
-    results: list[ResultInfo] = []
-    soup = BeautifulSoup(html, "lxml")
-
-    try:
-        result_containers = soup.find_all("div", class_="result-con")
-
-        for container in result_containers[:max_results]:
-            try:
-                link = container.find("a", href=re.compile(r"/matches/\d+/"))
-                if not link:
-                    continue
-
-                href = link.get("href", "") or ""
-                match_id = _extract_id_from_url(href)
-                if not match_id:
-                    continue
-
-                team_cells = link.find_all("td", class_="team-cell")
-                team1 = ""
-                team2 = ""
-
-                if len(team_cells) >= 2:
-                    team1_elem = team_cells[0].find("div", class_="team")
-                    team2_elem = team_cells[1].find("div", class_="team")
-                    team1 = team1_elem.get_text(strip=True) if team1_elem else ""
-                    team2 = team2_elem.get_text(strip=True) if team2_elem else ""
-
-                if not team1 or not team2:
-                    m = re.search(r"/([^/]+)-vs-([^/]+)-", href)
-                    if m:
-                        team1 = team1 or m.group(1).replace("-", " ").title()
-                        team2 = team2 or m.group(2).replace("-", " ").title()
-
-                score_cell = link.find("td", class_="result-score")
-                score1 = "0"
-                score2 = "0"
-
-                if score_cell:
-                    score_won = score_cell.find("span", class_="score-won")
-                    score_lost = score_cell.find("span", class_="score-lost")
-
-                    team1_cell = team_cells[0] if len(team_cells) >= 2 else None
-                    team1_won = False
-                    if team1_cell:
-                        team1_div = team1_cell.find("div", class_="team")
-                        if team1_div and "team-won" in (team1_div.get("class") or []):
-                            team1_won = True
-
-                    if team1_won:
-                        score1 = score_won.get_text(strip=True) if score_won else "0"
-                        score2 = score_lost.get_text(strip=True) if score_lost else "0"
-                    else:
-                        score1 = score_lost.get_text(strip=True) if score_lost else "0"
-                        score2 = score_won.get_text(strip=True) if score_won else "0"
-
-                if team1 and team2:
-                    results.append(
-                        ResultInfo(
-                            id=match_id,
-                            date="",
-                            team1=team1,
-                            team2=team2,
-                            score1=score1,
-                            score2=score2,
-                        )
-                    )
-            except Exception as e:
-                logger.debug(f"[HLTV] 解析单个结果失败: {e}")
-                continue
-
-        logger.info(f"[HLTV] 获取到 {len(results)} 个比赛结果")
-    except Exception as e:
-        logger.error(f"[HLTV] 解析结果列表失败: {e}")
-
+def parse_event_results(html: str, tz: Any, max_results: int = 20) -> list[ResultInfo]:
+    """解析 /results?event=xxx 页面；单条异常跳过，一条都解析不出来才算页面失败。"""
+    soup = make_soup(html)
+    containers = soup.find_all("div", class_="result-con")[:max_results]
+    results = [r for r in (_parse_result(c, tz) for c in containers) if r is not None]
+    if containers and not results:
+        raise ValueError("HLTV 结果页没有可解析的结果，页面结构可能已变")
+    logger.debug(f"[HLTV] 获取到 {len(results)} 个比赛结果")
     return results
 
 
-def _extract_id_from_url(url: str) -> str:
-    m = re.search(r"/(\d+)/", url or "")
-    return m.group(1) if m else ""
+def _parse_result(container, tz: Any) -> ResultInfo | None:
+    link = container.find("a", href=re.compile(r"/matches/\d+/"))
+    if link is None:
+        logger.warning(
+            f"[HLTV] 跳过没有比赛链接的结果节点: {text_of(container)[:80]!r}"
+        )
+        return None
+    match_id = extract_id_from_url(link["href"])
+
+    cells = (link.find_all("td", class_="team-cell") or container.find_all("td", class_="team-cell"))[:2]
+    teams = [cell.find("div", class_="team") for cell in cells]
+    team1, team2 = (text_of(team) for team in teams) if len(teams) == 2 else ("", "")
+    score_cell = link.find("td", class_="result-score") or container.find("td", class_="result-score")
+    won = text_of(score_cell.find("span", class_="score-won")) if score_cell else ""
+    lost = text_of(score_cell.find("span", class_="score-lost")) if score_cell else ""
+    team1_won = (
+        bool(team1)
+        and teams[0] is not None
+        and "team-won" in (teams[0].get("class") or [])
+    )
+    score1, score2 = (won, lost) if team1_won else (lost, won)
+    if not team1 or not team2 or not score1.isdigit() or not score2.isdigit():
+        logger.warning(
+            f"[HLTV] 跳过不完整的结果 {match_id}: {team1!r} {score1!r}-{score2!r} {team2!r}"
+        )
+        return None
+
+    return ResultInfo(
+        id=match_id,
+        date=format_date(container.get("data-zonedgrouping-entry-unix", ""), tz),
+        team1=team1,
+        team2=team2,
+        score1=score1,
+        score2=score2,
+        team1_logo=pick_logo(cells[0].find_all("img", class_="team-logo")),
+        team2_logo=pick_logo(cells[1].find_all("img", class_="team-logo")),
+        format=text_of(link.find("div", class_="map-text") or container.find("div", class_="map-text")),
+    )

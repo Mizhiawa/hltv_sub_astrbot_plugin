@@ -1,214 +1,129 @@
-# HLTV订阅（AstrBot 适配版）
-https://github.com/HakuchumuHYX/HakuBot/tree/main
-原 NoneBot2 插件 [hltv_sub] 的由 Mizhiawa 修改的 AstrBot 移植版，**功能保持不变**：
-HLTV CS2 赛事订阅、比赛/结果/数据查询、开赛提醒与结果推送（含单图结果推送）。
+# hltv_sub_astrbot_plugin
 
-## 命令
+移植自 [HakuchumuHYX/HakuBot](https://github.com/HakuchumuHYX/HakuBot) 中 `hltv_sub` 的 **HLTV (CS2) 大型赛事订阅与实时战报插件**，针对 **AstrBot 4.29.4 + SnowLuma 2.4.2 (OneBot v11)** 及 **Linux Ubuntu Docker** 部署环境重构与深度适配。
 
-与原版一致（无前缀、无需唤醒词，群内直接输入即可触发）：
+---
 
-| 命令 | 说明 |
-| --- | --- |
-| `event列表` / `赛事列表` / `events` | 查看近期大型赛事 |
-| `event订阅 [ID]` / `订阅赛事 [ID]` / `subscribe [ID]` | 订阅赛事（需群主/管理员） |
-| `event取消订阅 [ID]` / `取消订阅赛事 [ID]` / `unsubscribe [ID]` | 取消订阅（需群主/管理员） |
-| `我的订阅` / `订阅列表` / `mysub` | 查看已订阅赛事 |
-| `matches列表` / `比赛列表` / `matches` | 已订阅赛事的比赛列表（图片） |
-| `results列表` / `结果列表` / `results` | 已订阅赛事的最近结果（图片） |
-| `stats [match_id]` / `比赛数据 [match_id]` / `数据 [match_id]` | 比赛详细数据（图片） |
-| `hltv开启` / `hltv启用` | 本群启用功能（需群主/管理员） |
-| `hltv关闭` / `hltv禁用` | 本群禁用功能（需群主/管理员） |
-| `hltv帮助` / `hltvhelp` | 帮助（图片） |
-| `hltv_check` / `hltv_trigger` | 调试命令（仅超级用户） |
+## ✨ 功能特性
 
-## 安装（详细步骤）
+- **自动发现与生命周期维护**：
+  - 自动抓取 HLTV Big Events 并订阅，不错过近期大型赛事。
+  - 赛事结束后保留宽限期补齐全部赛果，确认无遗漏后自动取消订阅并清理过期去重缓存。
+  - 自适应轮询调度：无近期比赛时低频休眠，临近开赛、直播中或等待决赛 MVP 时自动切换至 3 分钟高频巡检。
+- **全流程精美卡片主动推送**：
+  - **开赛提醒**：包含对阵双方队标、赛制星级、总决赛/季军赛金色与铜色专属高亮、VRS 排名积分预测及赛事直邀概率（Invite Stakes）。
+  - **非 BO1 比赛逐图播报（支持开关 `enable_map_result_push`）**：默认开启，BO3/BO5 系列赛每打完一张非决胜图立即推送该图半场阵营比分（CT/T 着色）与双方选手详细表现；**关闭后每打完一张地图不再播报（也不产生额外单图抓取请求），仅保留开赛提醒与整场结果推送**。
+  - **全场终局战报**：自动校验结果页与详情页数据同步完整性（拒绝半残数据抢发），展示转播级比分条、VRS 赛后积分排名结算、地图池横幅、BP 顺序及仿 CS2 游戏内 TAB 计分板。
+  - **赛事 MVP 海报**：总决赛结束后持续追踪赛事主页（最长 3 小时），第一时间推送 HLTV 官方 MVP 选手定妆照、奖章及与赛事均值对比柱状图。
+- **Ubuntu Docker + SnowLuma 2.4.2 专项优化**：
+  - **跨容器零路径依赖**：渲染图片统一以内存字节（`Comp.Image.fromBytes` / `base64://`）投递给 SnowLuma，无需在 `astrbot` 与 `snowluma` 容器间挂载共享临时图片目录。
+  - **双渲染后端（`auto`）**：优先使用容器内 Playwright Chromium（自带 `--no-sandbox`、`--disable-dev-shm-usage` 防 64MB `/dev/shm` 崩溃、非 Headless UA 防队标拦截、2x 超清缩放及 15s 超时自动降级无图卡片）；若容器尚未安装 Chromium，自动无缝回退至 AstrBot 内置 `html_render` (T2I) 服务。
+  - **内置数字窄体与中文字体自动发现**：`Barlow Condensed` 已内联编码；中文优先读取持久化数据目录内的 `MiSans`，并自动兼容 Ubuntu `fonts-noto-cjk` / `fonts-wqy-microhei` / `fonts-wqy-zenhei`。
 
-### 前提
+---
 
-- AstrBot v4.5+ 已部署并运行（本插件按当前 4.x API 编写）
-- 已接入至少一个平台（推荐 OneBot v11 / `aiocqhttp` 适配器，如 NapCat、Lagrange、go-cqhttp 等）
-- 可正常访问 `https://www.hltv.org`（HLTV 数据源；必要时配置代理）
+## 🐳 Linux Ubuntu Docker 部署指南
 
-### 第 1 步：放置插件目录
+### 1. 部署 FlareSolverr（必需）
 
-将本插件目录（含 `main.py`、`metadata.yaml`、`_conf_schema.json` 的整个 `hltv_sub` 文件夹）放到 AstrBot 的插件目录：
+HLTV 启用了 Cloudflare 防护，插件通过 **FlareSolverr** 获取页面 HTML 并持久复用会话。建议将 `flaresolverr` 与 `astrbot`、`snowluma` 放在同一 Docker 网络中：
 
-- **本机/虚拟环境直接运行**：`<AstrBot 项目根>/data/plugins/hltv_sub`
-- **Docker 部署**：放到挂载进容器的 `data/plugins/` 目录下（即宿主机上
-  `compose.yml` 中 `./data:/AstrBot/data` 映射的 `./data/plugins/`）
-
-最终目录结构应为：
-
-```
-data/plugins/
-└── hltv_sub/
-    ├── main.py
-    ├── metadata.yaml
-    ├── _conf_schema.json
-    ├── requirements.txt
-    ├── handlers/  parsers/  scheduler_internal/
-    ├── config.py  data_manager.py  data_source.py  http_client.py
-    ├── image_utils.py  log_utils.py  models.py  permissions.py  render.py  scheduler.py
-    └── __init__.py
+```yaml
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - TZ=Asia/Shanghai
+    # 若与 astrbot 在同一 compose 网络中无需暴露宿主机端口；若需宿主机访问可取消下方注释：
+    # ports:
+    #   - "127.0.0.1:8191:8191"
 ```
 
-### 第 2 步：安装依赖
+- **同 Docker Compose 网络**：插件配置中 `flaresolverr_url` 填写 `http://flaresolverr:8191/v1`（默认）。
+- **宿主机桥接访问**：切勿填 `127.0.0.1`，请填写 Docker 网桥地址（通常为 `http://172.17.0.1:8191/v1`）。
 
-在 AstrBot 所在 Python 环境中执行：
+### 2. 安装插件与依赖
+
+在 AstrBot WebUI 插件市场通过仓库地址 `https://github.com/Mizhiawa/hltv_sub_astrbot_plugin` 安装，或在宿主机挂载的 `data/plugins/` 目录下克隆：
 
 ```bash
-pip install -r <插件目录>/requirements.txt
-# 等价于安装：curl_cffi httpx beautifulsoup4 lxml pytz Pillow apscheduler
+cd /path/to/astrbot/data/plugins
+git clone https://github.com/Mizhiawa/hltv_sub_astrbot_plugin.git hltv_sub
 ```
 
-若使用 AstrBot 的 Docker 镜像，依赖装在镜像内，需在容器里执行：
+随后在 `astrbot` 容器内确认 Python 依赖已安装：
 
 ```bash
-docker exec -it <astrbot容器名> pip install -r /AstrBot/data/plugins/hltv_sub/requirements.txt
+docker exec -it astrbot pip install -r /AstrBot/data/plugins/hltv_sub/requirements.txt
 ```
 
-> AstrBot WebUI 的插件管理页对部分插件支持自动安装依赖；若未自动安装，
-> 请按上面命令手动安装。安装后重启 AstrBot。
+### 3. （推荐）启用容器内 2x 本地超清 Playwright 渲染与中文字体
 
-### 第 3 步：安装中文字体（仅 Linux 服务器）
-
-图片用 Pillow 绘制，**不需要浏览器**。但绘制中文需要系统中文字体，
-否则图片里的中文会显示为方块：
+> 若跳过本步，`render_backend: auto` 会自动回退至 AstrBot 内置 `html_render` 服务，同样可直接出图。若追求与原版 HakuBot 完全一致的 2x 视网膜排版效果，推荐在容器内安装 Chromium 与中文字体，并将浏览器缓存持久化到 `/AstrBot/data` 卷中：
 
 ```bash
-# Debian / Ubuntu
-apt install -y fonts-noto-cjk
-
-# CentOS / RHEL / Fedora
-yum install -y google-noto-sans-cjk-fonts   # 或 dnf install
-
-# Alpine（Docker 常见）
-apk add font-noto-cjk
+docker exec -it \
+  -e PLAYWRIGHT_BROWSERS_PATH=/AstrBot/data/plugin_data/hltv_sub/playwright \
+  astrbot bash -c "apt-get update && apt-get install -y fonts-noto-cjk fonts-wqy-microhei fontconfig && fc-cache -fv && playwright install --with-deps chromium"
 ```
 
-Windows / macOS 自带中文字体，无需处理。
+（可选）如果你希望使用原版同款 **MiSans** 五字重字体，只需将 `MiSans-Regular.ttf`、`MiSans-Medium.ttf`、`MiSans-Semibold.ttf`、`MiSans-Bold.ttf`、`MiSans-Heavy.ttf` 放入宿主机挂载目录下的 `data/plugin_data/hltv_sub/fonts/`，插件会自动优先加载。
 
-### 第 4 步：启用插件
+### 4. SnowLuma 2.4.2 对接注意事项
 
-1. 打开 AstrBot WebUI → 「插件管理」。
-2. 确认列表中出现 `hltv_sub`（HLTV订阅），点击「启用」。
-3. 若需要，点击「管理」→「重载插件」使其生效。
+1. 在 SnowLuma 2.4.2 WebUI 中新建 **OneBot v11 反向 WebSocket** 连接，目标地址指向 AstrBot 的 `aiocqhttp` 适配器（例如 `ws://astrbot:6199/ws`）。
+2. 在目标 QQ 群中由群主、群管理员或 AstrBot 管理员发送 `hltv开启`（或 `/hltv开启`），插件会自动记录该群的 `unified_msg_origin` 并激活赛事巡检。
+3. 历史 `subscriptions.json`（无论来自 HakuBot 原版还是旧版 AstrBot 插件）直接位于 `data/plugin_data/hltv_sub/subscriptions.json` 时均可无缝升级兼容。
 
-### 第 5 步：配置插件（可选）
+---
 
-在 WebUI 插件管理的配置弹窗中按需修改（默认值与原版一致）：
+## ⚙️ 主要配置项说明
 
 | 配置项 | 默认值 | 说明 |
-| --- | --- | --- |
-| `hltv_timezone` | `Asia/Shanghai` | 比赛时间显示时区 |
-| `hltv_timeout` | `15` | 请求超时（秒） |
-| `hltv_request_interval_seconds` | `15.0` | 任意两次访问 HLTV 的最小间隔。**调大它是最有效的防封手段**（建议 15~30，与原版 HakuBot 一致） |
-| `hltv_block_cooldown_seconds` | `600` | 被 Cloudflare 拦截后首次冷却时长（秒） |
-| `hltv_block_cooldown_max_seconds` | `7200` | 连续被拦截时冷却时间的上限（秒） |
-| `hltv_flaresolverr_timeout_seconds` | `60` | 单次浏览器求解超时（秒） |
-| `hltv_min_delay` | `5.0` | **已废弃**，保留仅为兼容旧配置 |
-| `hltv_scheduler_max_parallel` | `3` | 多赛事轮询并发上限 |
-| `hltv_scheduler_jitter_seconds` | `8` | 轮询抖动（秒），防同刻并发 |
-| `hltv_auto_unsub_delay_days` | `2` | 赛事结束后延迟自动退订天数 |
-| `hltv_notified_ttl_days` | `30` | 推送去重状态保留天数 |
-| `hltv_watermark_text` | `Designed by Hakuchumu\nModified by M1z` | 图片水印 |
-| `hltv_proxy_list` | `[]` | 代理列表，如 `["http://127.0.0.1:7890"]` |
-| `hltv_impersonate` | `chrome124` | curl_cffi 浏览器指纹 |
-| `hltv_flaresolverr_url` | 空 | FlareSolverr 地址（**强烈建议配置**，见下方排障） |
-| `hltv_superusers` | `[]` | 插件级超级用户 ID（调试命令用；留空回退 AstrBot `admins_id`） |
-| `hltv_enable_map_result_push` | `true` | 非 BO1 比赛逐图播报开关。关闭后每打完一张地图不再播报，仅保留开赛提醒与整场结果推送 |
+| :--- | :--- | :--- |
+| `flaresolverr_url` | `http://flaresolverr:8191/v1` | FlareSolverr v1 接口地址 |
+| `flaresolverr_timeout_seconds` | `60` | FlareSolverr 单次页面超时时间（秒） |
+| `enable_map_result_push` | `true` | **非 BO1 比赛逐图播报开关**。关闭后每打完一张地图不再播报，仅保留开赛提醒与整场结果推送 |
+| `request_interval_seconds` | `0.0` | 串行请求最小间隔（秒） |
+| `session_max_requests` | `30` | 单个 FlareSolverr 浏览器会话最大请求次数（到期自动轮换防内存增长） |
+| `block_cooldown_seconds` | `600` | 被拦截后的初始冷却时间（秒） |
+| `block_cooldown_max_seconds` | `7200` | 连续被拦截指数退避冷却上限（秒） |
+| `timezone` | `Asia/Shanghai` | 赛事日期与比赛时间展示时区 |
+| `auto_unsub_delay_days` | `2` | 赛事结束后延迟自动取消订阅天数 |
+| `auto_sub_interval_days` | `7` | 自动扫描并订阅 HLTV Big Events 的间隔天数 |
+| `notified_ttl_days` | `30` | 推送去重状态保留天数 |
+| `render_backend` | `auto` | 渲染后端（`auto` / `playwright` / `astrbot_t2i`） |
+| `allow_no_prefix` | `true` | 允许群内免 `/` 唤醒前缀直接输入命令触发 |
+| `allow_group_admin` | `true` | 允许 QQ 群主与群管理员管理本群开关及赛事订阅 |
+| `default_enabled_groups` | `[]` | 默认启用 HLTV 推送的群号列表 |
+| `watermark_text` | `Designed by Hakuchumu\nModified by Mizhiawa` | 渲染卡片左下角水印文本 |
 
-## 排障：`matches` 报 403 / 一直「暂无比赛」
+---
 
-HLTV 前面是 Cloudflare。`event列表` 这类页面在 CDN 上有缓存、不带挑战，而
-`matches`（比赛列表）走的是动态页面，会优先命中 Cloudflare 的**交互式挑战**：
-返回 `403` 和一个 `Just a moment...` 页面，要求浏览器执行 JS 并带回
-`cf_clearance` cookie。
+## 📖 指令一览
 
-**这类挑战改请求头是解不掉的** —— 它需要真的有一个浏览器去执行 JS。所以：
+> 默认同时支持带唤醒前缀（如 `/events`）与免前缀直接发送（如 `events`）。
 
-### 1. 配置 FlareSolverr（推荐，一劳永逸）
+| 指令 | 别名 | 权限要求 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `hltv开启` | `hltv启用`、`hltvon` | 群主 / 群管理员 / Bot 管理员 | 开启本群 HLTV 赛事主动推送与查询功能 |
+| `hltv关闭` | `hltv禁用`、`hltvoff` | 群主 / 群管理员 / Bot 管理员 | 关闭本群 HLTV 功能 |
+| `hltv帮助` | `hltv菜单`、`hltvhelp` | 所有群成员 | 查看本群开启状态、逐图播报状态、订阅数及指令说明 |
+| `event列表` | `赛事列表`、`events` | 群成员（本群已开启） | 渲染 HLTV 正在进行及即将举行的 Big Events 卡片 |
+| `event订阅 <赛事ID>` | `订阅赛事`、`subscribe` | 群主 / 群管理员 / Bot 管理员 | 手动订阅指定赛事（如 `event订阅 7148`） |
+| `event取消订阅 <赛事ID>` | `取消订阅赛事`、`unsubscribe` | 群主 / 群管理员 / Bot 管理员 | 取消订阅指定赛事 |
+| `我的订阅` | `订阅列表`、`mysub` | 群成员（本群已开启） | 查看当前已订阅的所有赛事及举办日期 |
+| `matches列表` | `比赛列表`、`matches` | 群成员（本群已开启） | 渲染已订阅活跃赛事的直播与待开始赛程图 |
+| `results列表` | `结果列表`、`results` | 群成员（本群已开启） | 渲染已订阅活跃赛事的近期完赛比分图 |
+| `stats [比赛ID]` | `比赛数据`、`数据` | 群成员（本群已开启） | 渲染指定比赛 ID（或最近完赛）的详细战报数据图 |
 
-```bash
-docker run -d --name flaresolverr -p 8191:8191 --restart unless-stopped \
-  ghcr.io/flaresolverr/flaresolverr:latest
-```
+---
 
-然后在插件配置里填 `hltv_flaresolverr_url = http://127.0.0.1:8191/v1`。
+## 📄 开源许可与致谢
 
-配置后插件的处理流程是：
-
-1. 平时仍用 curl_cffi 直连（快、省资源）；
-2. 一旦命中挑战，改为让 FlareSolverr 用**持久浏览器会话**求解；
-3. 求解成功后，把它拿到的 `cf_clearance` 及其配套 User-Agent 回灌给
-   curl_cffi 会话并**存到磁盘**，之后一段时间的请求重新走快速路径 ——
-   也就是说一次浏览器求解能覆盖之后的一批请求，而不是每个请求都开浏览器；
-4. 浏览器崩溃或挑战反复失败时自动**更换会话**重试（最多一次）。
-
-> ⚠️ FlareSolverr 必须与插件在**同一出口 IP** 上（`cf_clearance` 与 IP 绑定）。
-> 若插件配了代理，FlareSolverr 也要能走同一个代理，否则回灌的通行证无效。
-
-### 2. 没配 FlareSolverr 时
-
-插件不会再硬撞：命中挑战会立刻停止重试并进入冷却（首次 600 秒，连续被拦按倍数
-递增，上限 2 小时），冷却期内直接快速失败、不再访问 HLTV，并在命令里给出
-「预计何时恢复」的提示，而不是笼统的「暂无比赛」。
-
-**冷却是按接口隔离的。** Cloudflare 的挑战规则按路径生效 —— 动态页（比赛列表
-`matches`）会被挑战，而赛事列表 `events`、结果列表 `results` 在 CDN 上有缓存、
-通常照常返回。因此 `matches` 被拦只会暂停 `matches`，`event列表` / `results`
-等命令可以继续正常使用。只有明确遇到硬封禁（页面提示 `You have been blocked`）
-时才停掉全部接口。
-
-冷却状态会持久化到数据目录（`http_state.json`），Bot 重启后依然生效。
-
-### 3. 其他可调项
-
-- 把 `hltv_request_interval_seconds` 调大（15 → 30）能明显降低被拦概率。默认值
-  15 秒与原版 HakuBot 保持一致；代价是请求变慢，订阅赛事较多时 `matches`
-  命令可能需要多等一会儿（同一页面的重复查询会命中缓存，不额外耗时）；
-- 把 `hltv_impersonate` 换成更新的指纹（如 `chrome131`）有时也有效。填了当前
-  curl_cffi 不支持的档位会自动回退到可用指纹（日志会给出提示），不会导致插件
-  不可用，所以可以放心试；
-- 出口 IP 是机房 IP 时更容易被拦，`hltv_proxy_list` 配住宅代理效果最好；
-- 被 Cloudflare 硬封禁（页面提示 `You have been blocked`）时换会话无效，
-  只能等冷却结束，通常换 IP 最快。
-
-
-### 第 6 步：验证
-
-在机器人所在的 QQ 群里（建议先在测试群）：
-
-1. 群主/管理员发送 `hltv开启` → 回复「✅ HLTV 订阅功能已开启」
-2. 发送 `event列表` → 收到赛事列表图片
-3. 发送 `event订阅 7148`（替换为列表中的真实 ID）→ 订阅成功
-4. 发送 `hltv帮助` → 收到帮助图片
-5. 关注后续开赛提醒 / 结果推送是否到达
-
-> 命令无需 `/` 前缀、无需 @ 机器人，群内直接输入即可（与原版一致）。
-
-### 数据迁移（可选，从 NoneBot 版迁移时）
-
-原版的订阅数据在 NoneBot localstore 数据目录下的
-`<插件数据目录>/subscriptions.json`，直接拷贝到
-`data/plugin_data/hltv_sub/subscriptions.json` 即可，文件格式兼容
-（原版群记录无 `platform_id` 字段，插件会回退到第一个 aiocqhttp 平台推送）。
-
-## 与原版的差异（仅平台适配部分）
-
-- 消息平台：原版仅支持 OneBot v11（onebot.v11），本版面向 AstrBot 的
-  `aiocqhttp` 适配器（`metadata.yaml` 的 `support_platforms`），
-  权限判定、图片发送、主动推送均通过 AstrBot API 实现。
-- 超级用户：原版读取 NoneBot 的 `superusers`；本版读取插件配置
-  `hltv_superusers`，未配置时回退到 AstrBot 全局 `admins_id`。
-- 图片渲染：原版使用 HTML 模板 + 无头浏览器截图；本版改用 Pillow 纯
-  Python 绘制（信息内容等价，视觉风格沿用深色主题），避免对浏览器的依赖。
-- 数据目录：`data/plugin_data/hltv_sub/subscriptions.json`
-  （原版为 NoneBot localstore 目录，需要迁移数据时手动拷贝该文件即可，
-  文件格式兼容）。
-- 定时任务：由内置 apscheduler 驱动（不再依赖 nonebot_plugin_apscheduler）。
-
-## 许可证
-
-本插件为原 [HakuBot](https://github.com/Hakuchumu/HakuBot) 项目
-`plugins/hltv_sub` 的移植，遵守原项目的开源许可协议。
+- 原插件设计与核心逻辑作者：**[Hakuchumu](https://github.com/HakuchumuHYX/HakuBot)**（MIT License）
+- AstrBot 移植维护：**[Mizhiawa](https://github.com/Mizhiawa/hltv_sub_astrbot_plugin)**
+- 内置数字字体：**Barlow Condensed**（SIL Open Font License 1.1，详见 [OFL.txt](./templates/fonts/OFL.txt)）

@@ -1,0 +1,712 @@
+{% extends "base.html" %}
+{% import "macros.html" as m with context %}
+
+{% block title %}HLTV Match Stats{% endblock %}
+
+{% block extra_styles %}
+.kicker {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.kicker-event {
+    font-size: 18px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.kicker-stage {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--num);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--gold);
+}
+
+/* 转播比分条：两侧队伍，中间倒梯形比分块 */
+.bug {
+    display: grid;
+    grid-template-columns: 1fr 200px 1fr;
+    height: 128px;
+    background: var(--panel);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.bug-team {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+    padding: 0 20px;
+}
+
+.bug-team.t2 {
+    flex-direction: row-reverse;
+    text-align: right;
+}
+
+.bug-info {
+    min-width: 0;
+}
+
+.bug-name {
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bug-country {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 6px;
+    font-size: 15px;
+    color: var(--muted);
+}
+
+.bug-team.t2 .bug-country {
+    justify-content: flex-end;
+}
+
+.bug-team.lost .bug-name {
+    color: var(--muted);
+}
+
+.bug-team.lost .logo-slot {
+    opacity: 0.45;
+}
+
+.bug-score {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: var(--bg);
+    clip-path: polygon(0 0, 100% 0, 88% 100%, 12% 100%);
+    font-size: 68px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.bug-score .sep {
+    color: var(--line);
+    font-size: 48px;
+}
+
+.trail {
+    color: var(--muted);
+}
+
+/* VRS 结算挂在比分条下沿，沿用同一套三栏，各队数据落在自己队名正下方 */
+.bug.has-vrs {
+    border-radius: 6px 6px 0 0;
+}
+
+.vrs {
+    display: grid;
+    grid-template-columns: 1fr 200px 1fr;
+    height: 64px;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: 0 0 6px 6px;
+    overflow: hidden;
+}
+
+.vrs-team {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 20px;
+}
+
+.vrs-team.t2 {
+    align-items: flex-end;
+}
+
+.vrs-rank-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    line-height: 1;
+}
+
+.vrs-from {
+    font-size: 19px;
+    color: var(--muted);
+}
+
+.vrs-rank {
+    font-size: 30px;
+    font-weight: 700;
+}
+
+.vrs-move {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.vrs-move.dim {
+    font-family: var(--cjk);
+    font-size: 15px;
+    font-weight: 400;
+}
+
+.vrs-points {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 16px;
+    color: var(--muted);
+}
+
+.vrs-points .delta {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+/* 中栏接着比分块的倒梯形继续收窄 */
+.vrs-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    background: var(--bg);
+    clip-path: polygon(12% 0, 88% 0, 82% 100%, 18% 100%);
+}
+
+.vrs-label .num {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--muted);
+}
+
+/* 赛前/赛中是 forecast：第一行当前排名积分，第二行胜/负两种结果 */
+.vrs-label .sub {
+    margin-top: 4px;
+    font-size: 14px;
+    color: var(--muted);
+}
+
+.vrs-now {
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.vrs-cases {
+    display: flex;
+    gap: 16px;
+    font-size: 17px;
+}
+
+.vrs-case .key {
+    margin-right: 5px;
+    font-family: var(--cjk);
+    font-size: 14px;
+    color: var(--muted);
+}
+
+.vrs-case .vrs-move {
+    margin-left: 3px;
+    font-size: 15px;
+}
+
+.vrs-case .delta {
+    margin-left: 6px;
+    font-weight: 600;
+}
+
+.bug-meta {
+    display: flex;
+    justify-content: center;
+    gap: 22px;
+    margin-top: 10px;
+    font-size: 15px;
+    color: var(--muted);
+}
+
+.bug-meta .live {
+    color: var(--live);
+    font-weight: 600;
+}
+
+.invites {
+    --invite-event: 340px;
+}
+
+/* 地图条：HLTV 地图横幅做底，半场比分按 CT/T 着色 */
+.maps {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 22px;
+}
+
+.map {
+    position: relative;
+    display: grid;
+    grid-template-columns: 130px 1fr auto 110px;
+    align-items: center;
+    gap: 18px;
+    height: 60px;
+    padding: 0 18px;
+    background: var(--panel);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.map.unplayed {
+    opacity: 0.45;
+}
+
+.map-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.42;
+}
+
+.map-shade {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        rgba(32, 38, 47, 0.94) 0%,
+        rgba(32, 38, 47, 0.6) 50%,
+        rgba(32, 38, 47, 0.9) 100%
+    );
+}
+
+.map-cell {
+    position: relative;
+    min-width: 0;
+}
+
+.map-name {
+    font-size: 27px;
+    font-weight: 700;
+}
+
+.map-pick {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.map-halves {
+    display: flex;
+    gap: 14px;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.ct {
+    color: var(--ct);
+}
+
+.t {
+    color: var(--t);
+}
+
+.map-score {
+    text-align: right;
+    font-size: 34px;
+    font-weight: 700;
+}
+
+.map-score .sep {
+    margin: 0 6px;
+    color: var(--muted);
+}
+
+/* BP 顺序本身就是信息，按发生顺序排一行 */
+.veto {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.veto-label {
+    margin-right: 4px;
+    font-size: 15px;
+    color: var(--muted);
+}
+
+.veto-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--num);
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.veto-step.ban {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.veto-step.pick {
+    border-color: var(--muted);
+}
+
+.veto-step.left {
+    border-style: dashed;
+}
+
+.veto-step.text {
+    font-family: var(--cjk);
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--muted);
+}
+
+/* 选手表：仿游戏内 TAB 计分板，两队并排，图宽一些换更短的总高度 */
+.board {
+    margin-top: 28px;
+}
+
+.board-teams {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.board-title {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.board-title .num {
+    font-size: 21px;
+    color: var(--muted);
+}
+
+.team-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 44px;
+    padding: 0 10px;
+    background: var(--panel);
+    border-radius: 4px;
+}
+
+.row {
+    display: grid;
+    grid-template-columns: 1fr 64px 46px 58px 62px 70px 54px;
+    align-items: center;
+    height: 40px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.row:last-child {
+    border-bottom: none;
+}
+
+.row.head {
+    height: 32px;
+}
+
+.who {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.team-name {
+    font-size: 22px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.nick {
+    font-size: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mvp {
+    color: var(--gold);
+    font-size: 16px;
+}
+
+.c {
+    text-align: right;
+    font-family: var(--num);
+    font-variant-numeric: tabular-nums;
+    font-size: 20px;
+    font-weight: 500;
+}
+
+.head .c {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.c.rating {
+    font-weight: 700;
+}
+
+.up {
+    color: var(--up);
+}
+
+.down {
+    color: var(--down);
+}
+
+.dim {
+    color: var(--muted);
+}
+{% endblock %}
+
+{% macro board(s, players, title, sub='') %}
+{% set top = players|map(attribute='rating')|map('float', 0)|list|max %}
+<div class="board">
+    <div class="board-title">
+        <span>{{ title }}</span>
+        {% if sub %}<span class="num">{{ sub }}</span>{% endif %}
+    </div>
+    <div class="board-teams">
+    {% for side in ['team1', 'team2'] %}
+    <div class="board-team">
+        <div class="team-bar">
+            {{ m.logo(s[side ~ '_logo'], 28) }}
+            <span class="team-name num">{{ s[side] }}</span>
+        </div>
+        <div class="row head">
+            <div></div>
+            <div class="c">K–D</div>
+            <div class="c">±</div>
+            <div class="c">ADR</div>
+            <div class="c">KAST</div>
+            <div class="c">Swing</div>
+            <div class="c">Rating</div>
+        </div>
+        {% for p in players if p.team == side %}
+        {% set diff = p.kills|int - p.deaths|int %}
+        {% set swing = p.swing|replace('%', '')|replace('+', '')|float(0) %}
+        {% set rating = p.rating|float(0) %}
+        <div class="row">
+            <div class="who">
+                {{ m.flag(p.country, p.country_name) }}
+                <span class="nick num">{{ p.nickname }}</span>
+                {% if top > 0 and rating == top %}<span class="mvp">★</span>{% endif %}
+            </div>
+            <div class="c">{{ p.kills }}–{{ p.deaths }}</div>
+            <div class="c {% if diff > 0 %}up{% elif diff < 0 %}down{% else %}dim{% endif %}">{{ '%+d'|format(diff) if diff else '0' }}</div>
+            <div class="c">{{ p.adr }}</div>
+            <div class="c">{{ p.kast }}</div>
+            <div class="c {% if swing > 1 %}up{% elif swing < -1 %}down{% endif %}">{{ p.swing }}</div>
+            <div class="c rating {% if rating > 1.05 %}up{% elif rating < 0.95 %}down{% endif %}">{{ p.rating }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+    </div>
+</div>
+{% endmacro %}
+
+{% macro vrs_side(v, cls) %}
+{% set move = v.rank_before - v.rank_after %}
+<div class="vrs-team {{ cls }}">
+    <div class="vrs-rank-line num">
+        <span class="vrs-from">#{{ v.rank_before }} →</span>
+        <span class="vrs-rank">#{{ v.rank_after }}</span>
+        <span class="vrs-move {% if move > 0 %}up{% elif move < 0 %}down{% else %}dim{% endif %}">{% if move > 0 %}▲{{ move }}{% elif move < 0 %}▼{{ -move }}{% else %}持平{% endif %}</span>
+    </div>
+    <div class="vrs-points num">
+        <span>{{ v.points_before }} → {{ v.points_before + v.points_delta }}</span>
+        <span class="delta {% if v.points_delta > 0 %}up{% elif v.points_delta < 0 %}down{% endif %}">{{ '%+d'|format(v.points_delta) }} pt</span>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro forecast_case(key, rank, new_rank, delta) %}
+{% set move = rank - new_rank %}
+<span class="vrs-case">
+    <span class="key">{{ key }}</span>#{{ new_rank }}{% if move %}<span class="vrs-move {{ 'up' if move > 0 else 'down' }}">{{ '▲' if move > 0 else '▼' }}{{ move|abs }}</span>{% endif %}
+    <span class="delta {{ 'up' if delta > 0 else 'down' if delta < 0 else '' }}">{{ '%+d'|format(delta) }}</span>
+</span>
+{% endmacro %}
+
+{% macro forecast_side(f, cls) %}
+<div class="vrs-team {{ cls }}">
+    {% if f %}
+    <div class="vrs-points num"><span class="vrs-now">#{{ f.rank }}</span><span>{{ f.points }} pt</span></div>
+    <div class="vrs-cases num">
+        {{ forecast_case('胜', f.rank, f.win_rank, f.win_delta) }}
+        {{ forecast_case('负', f.rank, f.lose_rank, f.lose_delta) }}
+    </div>
+    {% else %}
+    <div class="vrs-points">未上榜</div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+{% if stats %}
+{% set s = stats %}
+{% set score1 = s.score1|int %}
+{% set score2 = s.score2|int %}
+{% set finished = s.status|lower == 'match over' %}
+{% set status_text = {'match over': '已结束', 'live': '进行中'}.get(s.status|lower, s.status) %}
+{# 刚打完、HLTV 还没切到 result 时页面仍是 forecast，结束了就不再显示“如果赢/输” #}
+{% set show_forecast = not finished and (s.team1_vrs_forecast or s.team2_vrs_forecast) %}
+
+<div class="kicker">
+    <div class="kicker-event">{{ s.event or '比赛数据' }}</div>
+    {% if s.stage %}<div class="kicker-stage">{{ s.stage }}</div>{% endif %}
+</div>
+
+<div class="bug {% if s.team1_vrs or show_forecast %}has-vrs{% endif %}">
+    <div class="bug-team t1 {% if finished and score1 < score2 %}lost{% endif %}">
+        {{ m.logo(s.team1_logo, 76) }}
+        <div class="bug-info">
+            <div class="bug-name num">{{ s.team1 }}</div>
+            {% if s.team1_country_name %}
+            <div class="bug-country">{{ m.flag(s.team1_country, s.team1_country_name) }}<span>{{ s.team1_country_name }}</span></div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="bug-score num">
+        <span class="{% if score1 < score2 %}trail{% endif %}">{{ s.score1 }}</span>
+        <span class="sep">:</span>
+        <span class="{% if score2 < score1 %}trail{% endif %}">{{ s.score2 }}</span>
+    </div>
+    <div class="bug-team t2 {% if finished and score2 < score1 %}lost{% endif %}">
+        {{ m.logo(s.team2_logo, 76) }}
+        <div class="bug-info">
+            <div class="bug-name num">{{ s.team2 }}</div>
+            {% if s.team2_country_name %}
+            <div class="bug-country">{{ m.flag(s.team2_country, s.team2_country_name) }}<span>{{ s.team2_country_name }}</span></div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if s.team1_vrs %}
+<div class="vrs">
+    {{ vrs_side(s.team1_vrs, 't1') }}
+    <div class="vrs-label">
+        <span class="num">VRS</span>
+    </div>
+    {{ vrs_side(s.team2_vrs, 't2') }}
+</div>
+{% elif show_forecast %}
+<div class="vrs">
+    {{ forecast_side(s.team1_vrs_forecast, 't1') }}
+    <div class="vrs-label">
+        <span class="num">VRS</span>
+        <span class="sub">预测</span>
+    </div>
+    {{ forecast_side(s.team2_vrs_forecast, 't2') }}
+</div>
+{% endif %}
+
+<div class="bug-meta">
+    {% if s.format_line %}<span>{{ s.format_line }}</span>{% endif %}
+    {% if s.date %}<span class="num">{{ s.date }}</span>{% endif %}
+    <span class="{% if not finished %}live{% endif %}">{{ status_text }}</span>
+</div>
+
+{# 与 forecast 同理：比赛结束后不再显示“赢/输之后” #}
+{% if not finished and s.vrs_invites %}{{ m.invites(s) }}{% endif %}
+
+{% if s.maps %}
+<div class="maps">
+    {% for map in s.maps %}
+    {% set played = map.score_team1 != '-' and map.score_team2 != '-' %}
+    {% set ms1 = map.score_team1|int(0) %}
+    {% set ms2 = map.score_team2|int(0) %}
+    <div class="map {% if not played %}unplayed{% endif %}">
+        {% if show_images and map.image %}<img class="map-bg" src="{{ map.image }}" alt="" onerror="this.remove()">{% endif %}
+        <div class="map-shade"></div>
+        <div class="map-cell map-name num">{{ map.map_name }}</div>
+        <div class="map-cell map-pick">
+            {% if map.pick_by %}
+            {{ m.logo(s[map.pick_by ~ '_logo'], 20) }}<span>{{ s[map.pick_by] }} 选图</span>
+            {% else %}
+            <span>决胜图</span>
+            {% endif %}
+        </div>
+        <div class="map-cell map-halves num">
+            {% for h in map.halves %}
+            {% set other = {'ct': 't', 't': 'ct'}.get(h.team1_side, '') %}
+            <span><span class="{{ h.team1_side }}">{{ h.score1 }}</span>:<span class="{{ other }}">{{ h.score2 }}</span></span>
+            {% endfor %}
+        </div>
+        <div class="map-cell map-score num">
+            {% if played %}
+            <span class="{% if ms1 < ms2 %}trail{% endif %}">{{ map.score_team1 }}</span><span class="sep">:</span><span class="{% if ms2 < ms1 %}trail{% endif %}">{{ map.score_team2 }}</span>
+            {% else %}
+            <span class="trail">–</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if s.veto_steps %}
+<div class="veto">
+    <span class="veto-label">BP</span>
+    {% for step in s.veto_steps %}
+    <span class="veto-step {{ step.action }}">
+        {% if step.side %}{{ m.logo(s[step.side ~ '_logo'], 18) }}{% endif %}
+        <span>{{ step.map }}</span>
+    </span>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if s.players and s.show_total_overview %}
+{{ board(s, s.players, '全场数据') }}
+{% endif %}
+
+{% for map in s.maps if map.map_name in s.map_stats_details %}
+{{ board(s, s.map_stats_details[map.map_name], map.map_name, map.score_team1 ~ ' : ' ~ map.score_team2) }}
+{% endfor %}
+
+{% else %}
+<div class="empty">无法获取比赛数据</div>
+{% endif %}
+{% endblock %}
