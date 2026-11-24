@@ -1,4 +1,4 @@
-"""HLTV 页面数据获取、FlareSolverr 会话管理、缓存与指数退避冷却。"""
+"""HLTV 页面数据获取、FlareSolverr 会话管理、缓存与按作用域隔离的访问冷却。"""
 
 from __future__ import annotations
 
@@ -24,14 +24,31 @@ from .parsers.matches import parse_event_matches_page
 from .parsers.results import parse_event_results
 from .parsers.stats import parse_match_stats
 
+GLOBAL_SCOPE = "*"
+
+
+def _scope_of(cache_key: str) -> str:
+    prefix = cache_key.split(":", 1)[0]
+    if prefix in {"events", "event", "matches", "results", "stats"}:
+        return "events" if prefix == "event" else prefix
+    return GLOBAL_SCOPE
+
 
 class HLTVFetchError(Exception):
     def __init__(
-        self, reason: str, *, retry_at: float = 0, recoverable: bool = False
+        self,
+        reason: str,
+        *,
+        retry_at: float = 0,
+        recoverable: bool = False,
+        should_cooldown: bool = True,
+        global_ban: bool = False,
     ) -> None:
         self.reason = reason
         self.retry_at = retry_at
         self.recoverable = recoverable
+        self.should_cooldown = should_cooldown
+        self.global_ban = global_ban
         message = f"HLTV 暂时无法访问（{reason}）"
         if retry_at:
             when = datetime.fromtimestamp(retry_at, timezone.utc).astimezone(
@@ -71,15 +88,26 @@ class HLTVClient:
         self._session_requests = 0
         self._cache: OrderedDict[str, tuple[float, FetchResult]] = OrderedDict()
         self._inflight: dict[str, asyncio.Task[FetchResult]] = {}
-        self._probe: asyncio.Task[FetchResult] | None = None
         self._closed = False
 
+        # 按作用域记录冷却状态：{scope: {"blocked_until": float, "blocks": int, "reason": str}}
+        self._cooldown_scopes: dict[str, dict[str, float | int | str]] = {}
         state = load_json(
             self._state_path, missing_ok=True, default={}, backup_on_error=True
         )
-        raw_state = state.data if state.success else {}
-        self._blocked_until = float(raw_state.get("blocked_until", 0.0))
-        self._blocks = int(raw_state.get("blocks", 0))
+        if state.success and isinstance(state.data, dict):
+            # 若修改过 flaresolverr_url，自动丢弃旧地址留下的冷却状态
+            saved_endpoint = state.data.get("endpoint", "")
+            raw_scopes = state.data.get("scopes")
+            if saved_endpoint == self._endpoint and isinstance(raw_scopes, dict):
+                now_ts = time.time()
+                for sc, info in raw_scopes.items():
+                    if isinstance(info, dict) and float(info.get("blocked_until", 0.0)) > now_ts:
+                        self._cooldown_scopes[sc] = {
+                            "blocked_until": float(info.get("blocked_until", 0.0)),
+                            "blocks": int(info.get("blocks", 0)),
+                            "reason": str(info.get("reason", "访问冷却中")),
+                        }
 
         session_state = load_json(
             self._session_state_path, missing_ok=True, default={}, backup_on_error=True
@@ -200,22 +228,54 @@ class HLTVClient:
     def _save_state(self) -> None:
         atomic_write_json(
             self._state_path,
-            {"blocked_until": self._blocked_until, "blocks": self._blocks},
+            {"endpoint": self._endpoint, "scopes": self._cooldown_scopes},
         )
 
-    def _check_pause(self) -> None:
-        if time.time() < self._blocked_until:
-            raise HLTVFetchError("访问冷却中", retry_at=self._blocked_until)
-        if self._probe is not None and self._probe is not asyncio.current_task():
-            raise HLTVFetchError("恢复探测中")
-
-    def _pause(self, reason: str) -> HLTVFetchError:
-        self._blocks += 1
-        delay = min(self._cooldown * 2 ** min(self._blocks - 1, 20), self._max_cooldown)
-        self._blocked_until = time.time() + delay
+    def reset_cooldown(self) -> None:
+        """手动清空所有作用域的访问冷却状态并落盘。"""
+        self._cooldown_scopes.clear()
         self._save_state()
-        logger.warning(f"[HLTV] 暂停访问 reason={reason} seconds={delay}")
-        return HLTVFetchError(reason, retry_at=self._blocked_until)
+        logger.info("[HLTV] 已重置全部访问冷却状态")
+
+    def _check_pause(self, scope: str = GLOBAL_SCOPE) -> None:
+        now_ts = time.time()
+        for check_sc in (GLOBAL_SCOPE, scope):
+            entry = self._cooldown_scopes.get(check_sc)
+            if entry is None:
+                continue
+            until = float(entry.get("blocked_until", 0.0))
+            if now_ts < until:
+                reason = str(entry.get("reason") or "访问冷却中")
+                raise HLTVFetchError(f"冷却中：{reason}", retry_at=until)
+
+    def _pause(
+        self, scope: str, reason: str, *, global_ban: bool = False
+    ) -> HLTVFetchError:
+        target_scope = GLOBAL_SCOPE if global_ban else scope
+        prev = self._cooldown_scopes.get(target_scope, {})
+        blocks = int(prev.get("blocks", 0)) + 1
+        delay = min(self._cooldown * 2 ** min(blocks - 1, 20), self._max_cooldown)
+        until = time.time() + delay
+        self._cooldown_scopes[target_scope] = {
+            "blocked_until": until,
+            "blocks": blocks,
+            "reason": reason,
+        }
+        self._save_state()
+        logger.warning(
+            f"[HLTV] 暂停访问 scope={target_scope} reason={reason} seconds={delay}"
+        )
+        return HLTVFetchError(reason, retry_at=until, global_ban=global_ban)
+
+    def _clear_scope(self, scope: str) -> None:
+        changed = False
+        for sc in (GLOBAL_SCOPE, scope):
+            if sc in self._cooldown_scopes:
+                self._cooldown_scopes.pop(sc, None)
+                changed = True
+        if changed:
+            self._save_state()
+            logger.info(f"[HLTV] 作用域 {scope} 已恢复正常访问")
 
     def _save_session_state(self) -> None:
         atomic_write_json(
@@ -228,11 +288,8 @@ class HLTVClient:
 
     async def start(self) -> None:
         async with self._lock:
-            self._check_pause()
-            try:
-                await self._prepare_session()
-            except HLTVFetchError as exc:
-                raise self._pause(exc.reason) from None
+            self._check_pause(GLOBAL_SCOPE)
+            await self._prepare_session()
 
     async def _prepare_session(self) -> None:
         data = await self._call("sessions.list")
@@ -240,7 +297,7 @@ class HLTVClient:
         if not isinstance(sessions, list) or any(
             not isinstance(session, str) or not session for session in sessions
         ):
-            raise HLTVFetchError("FlareSolverr 会话列表无效")
+            raise HLTVFetchError("FlareSolverr 会话列表无效", should_cooldown=False)
 
         if not self._session_id:
             self._session_id = sessions[0] if sessions else str(uuid4())
@@ -250,7 +307,9 @@ class HLTVClient:
         if self._session_id not in sessions:
             created = await self._call("sessions.create", session=self._session_id)
             if created.get("session") != self._session_id:
-                raise HLTVFetchError("FlareSolverr 返回了不匹配的会话 ID")
+                raise HLTVFetchError(
+                    "FlareSolverr 返回了不匹配的会话 ID", should_cooldown=False
+                )
             self._session_requests = 0
             logger.debug(f"[HLTV] 新会话创建成功 session={self._session_id}")
 
@@ -289,7 +348,7 @@ class HLTVClient:
         force_refresh: bool = False,
     ) -> FetchResult:
         if self._closed:
-            raise HLTVFetchError("客户端已关闭")
+            raise HLTVFetchError("客户端已关闭", should_cooldown=False)
         cached = self._cache.get(cache_key)
         if not force_refresh and cached and time.monotonic() - cached[0] < ttl:
             self._cache.move_to_end(cache_key)
@@ -298,24 +357,21 @@ class HLTVClient:
         task = self._inflight.get(cache_key)
         if task is not None:
             return await asyncio.shield(task)
-        self._check_pause()
-        task = asyncio.create_task(self._fetch_and_cache(url, cache_key))
+        scope = _scope_of(cache_key)
+        self._check_pause(scope)
+        task = asyncio.create_task(self._fetch_and_cache(url, cache_key, scope))
         self._inflight[cache_key] = task
-        if self._blocked_until:
-            self._probe = task
         task.add_done_callback(lambda done: self._finish(cache_key, done))
         return await asyncio.shield(task)
 
     def _finish(self, key: str, task: asyncio.Task[FetchResult]) -> None:
         self._inflight.pop(key, None)
-        if self._probe is task:
-            self._probe = None
         if not task.cancelled():
             task.exception()
 
-    async def _fetch_and_cache(self, url: str, key: str) -> FetchResult:
+    async def _fetch_and_cache(self, url: str, key: str, scope: str) -> FetchResult:
         async with self._lock:
-            self._check_pause()
+            self._check_pause(scope)
             try:
                 await self._prepare_session()
                 if self._session_requests >= self._session_max_requests:
@@ -323,7 +379,7 @@ class HLTVClient:
                 try:
                     result = await self._request(url, key)
                 except HLTVFetchError as exc:
-                    logger.debug(f"[HLTV] 首次抓取失败 page={key} reason={exc.reason}")
+                    logger.warning(f"[HLTV] 首次抓取失败 page={key} reason={exc.reason}")
                     if not exc.recoverable:
                         raise
                     await self._replace_session()
@@ -332,12 +388,13 @@ class HLTVClient:
                         f"[HLTV] 换会话重试成功 page={key} first_reason={exc.reason}"
                     )
             except HLTVFetchError as exc:
-                raise self._pause(exc.reason) from None
-            if self._blocked_until:
-                self._blocks = 0
-                self._blocked_until = 0.0
-                self._save_state()
-                logger.info("[HLTV] 恢复访问")
+                if exc.should_cooldown:
+                    raise self._pause(
+                        scope, exc.reason, global_ban=exc.global_ban
+                    ) from None
+                logger.warning(f"[HLTV] 请求异常（未计入冷却锁）: {exc.reason}")
+                raise
+            self._clear_scope(scope)
             self._cache[key] = (time.monotonic(), result)
             self._cache.move_to_end(key)
             while len(self._cache) > 256:
@@ -356,16 +413,20 @@ class HLTVClient:
             )
             data = response.json()
         except (httpx.HTTPError, ValueError):
-            raise HLTVFetchError("FlareSolverr 连接失败或响应无效") from None
+            raise HLTVFetchError(
+                "FlareSolverr 连接失败或响应无效", should_cooldown=False
+            ) from None
 
         if not isinstance(data, dict):
-            raise HLTVFetchError("FlareSolverr 响应无效")
+            raise HLTVFetchError("FlareSolverr 响应无效", should_cooldown=False)
         if data.get("status") != "ok":
             message = str(data.get("message", "")).lower()
             if command == "sessions.destroy" and "session doesn't exist" in message:
                 return data
             if command != "request.get":
-                raise HLTVFetchError(f"FlareSolverr 会话管理失败（{command}）")
+                raise HLTVFetchError(
+                    f"FlareSolverr 会话管理失败（{command}）", should_cooldown=False
+                )
             if any(
                 marker in message
                 for marker in (
@@ -377,29 +438,42 @@ class HLTVClient:
                     "not connected to devtools",
                 )
             ):
-                raise HLTVFetchError("浏览器崩溃或断连", recoverable=True)
+                raise HLTVFetchError(
+                    "FlareSolverr 浏览器崩溃或断连",
+                    recoverable=True,
+                    should_cooldown=False,
+                )
             if "timeout after" in message:
                 raise HLTVFetchError("页面处理超时", recoverable=True)
             if any(
                 marker in message
                 for marker in (
-                    "captcha detected",
-                    "challenge not solved",
                     "cloudflare has blocked",
                     "access denied",
+                )
+            ):
+                raise HLTVFetchError(
+                    "IP 被 Cloudflare 封禁或拒绝访问",
+                    recoverable=True,
+                    global_ban=True,
+                )
+            if any(
+                marker in message
+                for marker in (
+                    "captcha detected",
+                    "challenge not solved",
                 )
             ):
                 raise HLTVFetchError("浏览器挑战未通过", recoverable=True)
             raise HLTVFetchError("FlareSolverr 页面处理异常", recoverable=True)
         if not response.is_success:
-            raise HLTVFetchError("FlareSolverr API 请求失败")
+            raise HLTVFetchError("FlareSolverr API 请求失败", should_cooldown=False)
         return data
 
     async def _request(self, url: str, key: str) -> FetchResult:
         delay = self._last_request + self._interval - time.monotonic()
         if delay > 0:
             await asyncio.sleep(delay)
-        self._check_pause()
         self._last_request = time.monotonic()
         self._request_count += 1
         self._session_requests += 1
@@ -415,7 +489,7 @@ class HLTVClient:
         )
         solution = data.get("solution")
         if not isinstance(solution, dict):
-            raise HLTVFetchError("FlareSolverr 页面响应无效")
+            raise HLTVFetchError("FlareSolverr 页面响应无效", should_cooldown=False)
         html = solution.get("response")
         final_url = solution.get("url")
         if not isinstance(html, str) or not html.strip():
@@ -432,23 +506,25 @@ class HLTVClient:
         soup = make_soup(html)
         title = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
         heading = soup.h1.get_text(" ", strip=True).lower() if soup.h1 else ""
-        blocked = (
-            any(
-                marker in title or marker in heading
-                for marker in (
-                    "just a moment",
-                    "access denied",
-                    "sorry, you have been blocked",
-                )
+        hard_blocked = any(
+            marker in title or marker in heading
+            for marker in ("access denied", "sorry, you have been blocked")
+        )
+        if hard_blocked:
+            raise HLTVFetchError(
+                "页面提示拒绝访问或 IP 被封禁", recoverable=True, global_ban=True
             )
+        challenged = (
+            "just a moment" in title
+            or "just a moment" in heading
             or soup.select_one(
                 "#challenge-form, #cf-challenge-running, #cf-please-wait, "
                 "#challenge-spinner, #turnstile-wrapper, .cf-error-details"
             )
             is not None
         )
-        if blocked:
-            raise HLTVFetchError("页面仍为挑战或拒绝访问页", recoverable=True)
+        if challenged:
+            raise HLTVFetchError("页面仍为 Cloudflare 挑战页", recoverable=True)
         if "hltv.org" not in title or any(
             marker in title for marker in ("not found", "server error", "unavailable")
         ):

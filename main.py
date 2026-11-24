@@ -35,6 +35,7 @@ PREFIXLESS_CMD_RE = (
     r"^(?!/)(?:"
     r"hltv开启|hltv启用|hltvon|"
     r"hltv关闭|hltv禁用|hltvoff|"
+    r"hltv重置冷却|hltv解封|hltvreset|"
     r"hltv帮助|hltv菜单|hltvhelp|"
     r"event列表|赛事列表|events|"
     r"我的订阅|订阅列表|mysub|"
@@ -47,6 +48,7 @@ PREFIXLESS_CMD_RE = (
 )
 _PREFIXLESS_PARSE_RE = re.compile(
     r"^(?P<cmd>hltv开启|hltv启用|hltvon|hltv关闭|hltv禁用|hltvoff|"
+    r"hltv重置冷却|hltv解封|hltvreset|"
     r"hltv帮助|hltv菜单|hltvhelp|event列表|赛事列表|events|"
     r"我的订阅|订阅列表|mysub|matches列表|比赛列表|matches|"
     r"results列表|结果列表|results|event订阅|订阅赛事|subscribe|"
@@ -105,6 +107,7 @@ class HLTVSubPlugin(Star):
         self._tz = pytz.timezone(self.plugin_config.timezone)
         self.data_dir = _resolve_data_dir()
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"[HLTV] 插件数据目录: {self.data_dir}")
 
         self.data_manager = DataManager(
             self.data_dir,
@@ -412,6 +415,21 @@ class HLTVSubPlugin(Star):
         self._stop(event)
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    @filter.command("hltv重置冷却", alias={"hltv解封", "hltvreset"})
+    async def cmd_hltv_reset_cooldown(self, event: AstrMessageEvent):
+        """手动清空 HLTV 访问冷却状态。"""
+        if not await self._has_manage_permission(event):
+            yield _disable_t2i(
+                event.plain_result("❌ 权限不足：仅群主、群管理员或 Bot 管理员可执行此操作")
+            )
+            self._stop(event)
+            return
+        self.client.reset_cooldown()
+        self.scheduler.sync_events(wake=True)
+        yield _disable_t2i(event.plain_result("✅ 已清空 HLTV 访问冷却状态，可立即重试查询"))
+        self._stop(event)
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     @filter.command("hltv帮助", alias={"hltv菜单", "hltvhelp"})
     async def cmd_hltv_help(self, event: AstrMessageEvent):
         """查看 HLTV 插件指令说明与本群状态。"""
@@ -431,6 +449,7 @@ class HLTVSubPlugin(Star):
             f"全局已订阅赛事：{sub_count} 个\n\n"
             f"📌 管理指令（群主/群管/Bot管理员）：\n"
             f"• hltv开启 / hltv关闭 — 开关本群推送与查询\n"
+            f"• hltv重置冷却 — 手动清空访问冷却锁（别名：hltv解封 / hltvreset）\n"
             f"• event订阅 <赛事ID> — 订阅指定赛事（别名：订阅赛事 / subscribe）\n"
             f"• event取消订阅 <赛事ID> — 取消订阅（别名：取消订阅赛事 / unsubscribe）\n\n"
             f"📊 查询指令（本群开启后可用）：\n"
@@ -813,6 +832,8 @@ class HLTVSubPlugin(Star):
             gen = self.cmd_hltv_enable(event)
         elif cmd in {"hltv关闭", "hltv禁用", "hltvoff"}:
             gen = self.cmd_hltv_disable(event)
+        elif cmd in {"hltv重置冷却", "hltv解封", "hltvreset"}:
+            gen = self.cmd_hltv_reset_cooldown(event)
         elif cmd in {"hltv帮助", "hltv菜单", "hltvhelp"}:
             gen = self.cmd_hltv_help(event)
         elif cmd in {"event列表", "赛事列表", "events"}:
