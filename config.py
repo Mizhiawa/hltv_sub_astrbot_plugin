@@ -25,6 +25,7 @@ class PluginConfig:
 
     flaresolverr_url: str = "http://flaresolverr:8191/v1"
     flaresolverr_timeout_seconds: int = 60
+    proxy_url: str = ""
     enable_map_result_push: bool = True
     request_interval_seconds: float = 0.0
     session_max_requests: int = 30
@@ -92,6 +93,12 @@ class PluginConfig:
             )
         )
 
+        raw_proxy = str(data.get("proxy_url") or "").strip()
+        if not raw_proxy:
+            legacy_proxies = data.get("hltv_proxy_list")
+            if isinstance(legacy_proxies, list) and legacy_proxies:
+                raw_proxy = str(legacy_proxies[0] or "").strip()
+
         return cls(
             flaresolverr_url=url,
             flaresolverr_timeout_seconds=max(
@@ -105,6 +112,7 @@ class PluginConfig:
                     )
                 ),
             ),
+            proxy_url=raw_proxy,
             enable_map_result_push=enable_map_push,
             request_interval_seconds=max(
                 0.0, float(data.get("request_interval_seconds", 0.0))

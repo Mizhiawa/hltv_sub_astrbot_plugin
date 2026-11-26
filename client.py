@@ -73,6 +73,7 @@ class HLTVClient:
         self._interval = config.request_interval_seconds
         self._session_max_requests = config.session_max_requests
         self._endpoint = config.flaresolverr_url
+        self._proxy_url = config.proxy_url
         self._cooldown = config.block_cooldown_seconds
         self._max_cooldown = config.block_cooldown_max_seconds
 
@@ -86,6 +87,7 @@ class HLTVClient:
         self._last_request = 0.0
         self._request_count = 0
         self._session_requests = 0
+        self._consecutive_timeouts = 0
         self._cache: OrderedDict[str, tuple[float, FetchResult]] = OrderedDict()
         self._inflight: dict[str, asyncio.Task[FetchResult]] = {}
         self._closed = False
@@ -96,10 +98,15 @@ class HLTVClient:
             self._state_path, missing_ok=True, default={}, backup_on_error=True
         )
         if state.success and isinstance(state.data, dict):
-            # 若修改过 flaresolverr_url，自动丢弃旧地址留下的冷却状态
+            # 若修改过 flaresolverr_url 或 proxy_url，自动丢弃旧冷却状态
             saved_endpoint = state.data.get("endpoint", "")
+            saved_proxy = state.data.get("proxy_url", "")
             raw_scopes = state.data.get("scopes")
-            if saved_endpoint == self._endpoint and isinstance(raw_scopes, dict):
+            if (
+                saved_endpoint == self._endpoint
+                and saved_proxy == self._proxy_url
+                and isinstance(raw_scopes, dict)
+            ):
                 now_ts = time.time()
                 for sc, info in raw_scopes.items():
                     if isinstance(info, dict) and float(info.get("blocked_until", 0.0)) > now_ts:
@@ -113,10 +120,16 @@ class HLTVClient:
             self._session_state_path, missing_ok=True, default={}, backup_on_error=True
         )
         raw_session = session_state.data if session_state.success else {}
-        self._session_id = str(raw_session.get("selected_session_id", ""))
-        self._pending_cleanup_id = str(
-            raw_session.get("pending_cleanup_session_id", "")
-        )
+        saved_session_proxy = str(raw_session.get("proxy_url", ""))
+        prev_selected = str(raw_session.get("selected_session_id", ""))
+        prev_cleanup = str(raw_session.get("pending_cleanup_session_id", ""))
+        # FlareSolverr 代理必须在 sessions.create 时绑定；代理配置变更时自动废弃旧会话重建
+        if saved_session_proxy != self._proxy_url and prev_selected:
+            self._session_id = ""
+            self._pending_cleanup_id = prev_selected
+        else:
+            self._session_id = prev_selected
+            self._pending_cleanup_id = prev_cleanup
 
     async def get_big_events(self) -> list[EventInfo]:
         """获取 Big Events（正在进行 + 即将举行的赛事）。"""
@@ -228,7 +241,11 @@ class HLTVClient:
     def _save_state(self) -> None:
         atomic_write_json(
             self._state_path,
-            {"endpoint": self._endpoint, "scopes": self._cooldown_scopes},
+            {
+                "endpoint": self._endpoint,
+                "proxy_url": self._proxy_url,
+                "scopes": self._cooldown_scopes,
+            },
         )
 
     def reset_cooldown(self) -> None:
@@ -283,6 +300,7 @@ class HLTVClient:
             {
                 "selected_session_id": self._session_id,
                 "pending_cleanup_session_id": self._pending_cleanup_id,
+                "proxy_url": self._proxy_url,
             },
         )
 
@@ -300,18 +318,28 @@ class HLTVClient:
             raise HLTVFetchError("FlareSolverr 会话列表无效", should_cooldown=False)
 
         if not self._session_id:
-            self._session_id = sessions[0] if sessions else str(uuid4())
+            # 配置了代理时必须新建会话以便在 sessions.create 中绑定 proxy
+            self._session_id = (
+                sessions[0] if (sessions and not self._proxy_url) else str(uuid4())
+            )
             self._save_session_state()
             logger.debug(f"[HLTV] 选择浏览器会话 session={self._session_id}")
 
         if self._session_id not in sessions:
-            created = await self._call("sessions.create", session=self._session_id)
+            create_kwargs: dict[str, object] = {"session": self._session_id}
+            if self._proxy_url:
+                create_kwargs["proxy"] = {"url": self._proxy_url}
+            created = await self._call("sessions.create", **create_kwargs)
             if created.get("session") != self._session_id:
                 raise HLTVFetchError(
                     "FlareSolverr 返回了不匹配的会话 ID", should_cooldown=False
                 )
             self._session_requests = 0
-            logger.debug(f"[HLTV] 新会话创建成功 session={self._session_id}")
+            self._consecutive_timeouts = 0
+            logger.info(
+                f"[HLTV] 新浏览器会话创建成功 session={self._session_id} "
+                f"proxy={'enabled' if self._proxy_url else 'direct'}"
+            )
 
         if self._pending_cleanup_id:
             if self._pending_cleanup_id in sessions:
@@ -444,7 +472,16 @@ class HLTVClient:
                     should_cooldown=False,
                 )
             if "timeout after" in message:
-                raise HLTVFetchError("页面处理超时", recoverable=True)
+                self._consecutive_timeouts += 1
+                if self._consecutive_timeouts >= 3:
+                    # 连续 3 次超时才在下轮更换标签页，避免单次网络抖动白白销毁已有 cf_clearance
+                    self._session_requests = self._session_max_requests
+                    self._consecutive_timeouts = 0
+                raise HLTVFetchError(
+                    "页面处理超时",
+                    recoverable=False,
+                    should_cooldown=False,
+                )
             if any(
                 marker in message
                 for marker in (
@@ -537,6 +574,7 @@ class HLTVClient:
                 element.decompose()
         if body is None or not body.get_text(" ", strip=True):
             raise HLTVFetchError("页面正文为空", recoverable=True)
+        self._consecutive_timeouts = 0
         logger.debug(
             f"[HLTV] response page={key} "
             f"elapsed={time.monotonic() - self._last_request:.2f}s"

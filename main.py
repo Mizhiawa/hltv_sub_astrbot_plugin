@@ -442,10 +442,16 @@ class HLTVSubPlugin(Star):
             if self.plugin_config.enable_map_result_push
             else "❌ 已关闭（仅播报开赛提醒与整场结果）"
         )
+        proxy_str = (
+            f"✅ 已启用 ({self.plugin_config.proxy_url})"
+            if self.plugin_config.proxy_url
+            else "未配置（直连）"
+        )
         help_text = (
             f"🎯 HLTV CS 赛事订阅插件\n"
             f"当前本群状态：{status_str}\n"
             f"非 BO1 逐图播报：{map_push_str}\n"
+            f"代理加速状态：{proxy_str}\n"
             f"全局已订阅赛事：{sub_count} 个\n\n"
             f"📌 管理指令（群主/群管/Bot管理员）：\n"
             f"• hltv开启 / hltv关闭 — 开关本群推送与查询\n"

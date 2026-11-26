@@ -10,6 +10,12 @@
     "description": "FlareSolverr 单次页面超时时间（秒）",
     "default": 60
   },
+  "proxy_url": {
+    "type": "string",
+    "description": "HLTV 抓取与渲染代理地址（强烈推荐国内服务器配置）",
+    "hint": "填写 HTTP 或 SOCKS5 代理地址（如同 Docker 网络下的 http://mihomo:7890），仅作用于 FlareSolverr 与卡片队标加载，不影响宿主机和 SnowLuma QQ 直连",
+    "default": ""
+  },
   "enable_map_result_push": {
     "type": "bool",
     "description": "非 BO1 比赛逐图播报开关",

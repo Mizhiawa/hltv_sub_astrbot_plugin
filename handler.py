@@ -481,12 +481,33 @@ class HLTVHandler:
     async def send_match_reminder(
         self, sub: EventSubscription, match: MatchInfo
     ) -> None:
-        stats = await self._client.get_match_stats(
-            match.id,
-            team1=match.team1,
-            team2=match.team2,
-            event_title=sub.event_title,
-        )
+        try:
+            stats = await self._client.get_match_stats(
+                match.id,
+                team1=match.team1,
+                team2=match.team2,
+                event_title=sub.event_title,
+            )
+        except HLTVFetchError as e:
+            # 详情页若因网络超时暂不可达，直接用赛程卡片现有队名与队标降级发送，确保开赛提醒绝不延误
+            logger.warning(
+                f"[HLTV] 比赛提醒拉取详情页失败 ({e.reason})，使用基础对阵信息准时播报 match={match.id}"
+            )
+            stats = MatchStats(
+                match_id=match.id,
+                team1=match.team1,
+                team2=match.team2,
+                score1="0",
+                score2="0",
+                status="LIVE",
+                maps=[],
+                players=[],
+                event=sub.event_title,
+                team1_logo=match.team1_logo,
+                team2_logo=match.team2_logo,
+                is_grand_final=match.is_grand_final,
+                is_third_place=match.is_third_place,
+            )
         try:
             img = await self._renderer.render_reminder(match, stats, sub.event_title)
         except Exception as e:

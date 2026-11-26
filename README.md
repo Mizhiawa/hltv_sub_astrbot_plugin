@@ -86,6 +86,7 @@ docker exec -it \
 | :--- | :--- | :--- |
 | `flaresolverr_url` | `http://flaresolverr:8191/v1` | FlareSolverr v1 接口地址 |
 | `flaresolverr_timeout_seconds` | `60` | FlareSolverr 单次页面超时时间（秒） |
+| `proxy_url` | `""` | **抓取与渲染代理地址**（如 `http://mihomo:7890`），仅作用于 HLTV 页面与队标，不影响宿主机与 QQ 直连 |
 | `enable_map_result_push` | `true` | **非 BO1 比赛逐图播报开关**。关闭后每打完一张地图不再播报，仅保留开赛提醒与整场结果推送 |
 | `request_interval_seconds` | `0.0` | 串行请求最小间隔（秒） |
 | `session_max_requests` | `30` | 单个 FlareSolverr 浏览器会话最大请求次数（到期自动轮换防内存增长） |
@@ -111,6 +112,7 @@ docker exec -it \
 | :--- | :--- | :--- | :--- |
 | `hltv开启` | `hltv启用`、`hltvon` | 群主 / 群管理员 / Bot 管理员 | 开启本群 HLTV 赛事主动推送与查询功能 |
 | `hltv关闭` | `hltv禁用`、`hltvoff` | 群主 / 群管理员 / Bot 管理员 | 关闭本群 HLTV 功能 |
+| `hltv重置冷却` | `hltv解封`、`hltvreset` | 群主 / 群管理员 / Bot 管理员 | 手动清空 HLTV 访问冷却状态 |
 | `hltv帮助` | `hltv菜单`、`hltvhelp` | 所有群成员 | 查看本群开启状态、逐图播报状态、订阅数及指令说明 |
 | `event列表` | `赛事列表`、`events` | 群成员（本群已开启） | 渲染 HLTV 正在进行及即将举行的 Big Events 卡片 |
 | `event订阅 <赛事ID>` | `订阅赛事`、`subscribe` | 群主 / 群管理员 / Bot 管理员 | 手动订阅指定赛事（如 `event订阅 7148`） |

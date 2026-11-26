@@ -169,6 +169,7 @@ class BrowserPool:
         self,
         *,
         browsers_path: str = "",
+        proxy_url: str = "",
         data_dir: Path,
         max_contexts: int = 4,
         idle_seconds: int = 300,
@@ -181,6 +182,7 @@ class BrowserPool:
         self._active = 0
         self._idle_seconds = idle_seconds
         self._browsers_path = browsers_path
+        self._proxy_url = proxy_url
         self._data_dir = data_dir
 
     async def _launch_browser(self) -> Any:
@@ -239,9 +241,15 @@ class BrowserPool:
                     acquired = True
                     browser = self._browser
 
+                ctx_opts: dict[str, Any] = {
+                    "user_agent": _chrome_user_agent(browser.version),
+                    **options,
+                }
+                if self._proxy_url:
+                    ctx_opts.setdefault("proxy", {"server": self._proxy_url})
                 context = await browser.new_context(
                     device_scale_factor=device_scale_factor,
-                    **{"user_agent": _chrome_user_agent(browser.version), **options},
+                    **ctx_opts,
                 )
                 yield await context.new_page()
             finally:
@@ -319,6 +327,7 @@ class HLTVRenderer:
         self._t2i_fallback = t2i_fallback
         self._pool = BrowserPool(
             browsers_path=config.playwright_browsers_path,
+            proxy_url=config.proxy_url,
             data_dir=self._data_dir,
         )
         self._font_css = _discover_cjk_font_css(config.custom_font_dir, self._data_dir)
